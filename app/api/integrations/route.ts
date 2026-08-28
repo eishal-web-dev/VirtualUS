@@ -3,6 +3,7 @@ import { requireTenant } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
 import { getMessagingProvider } from "@/lib/messaging";
 import { isConfigured as isShopifyConfigured } from "@/lib/shopify";
+import { getTelecomProvider, isTelecomConfigured } from "@/lib/telecom";
 import type { IntegrationProvider } from "@prisma/client";
 
 const CHANNEL_PROVIDERS: { provider: IntegrationProvider; label: string }[] = [
@@ -25,9 +26,12 @@ export async function GET() {
   const integrations = CHANNEL_PROVIDERS.map(({ provider, label }) => {
     const row = byProvider.get(provider);
     let isConfigured = false;
+    let accountName = row?.externalAccountName ?? null;
     try {
       if (provider === "TWILIO") {
-        isConfigured = Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN);
+        const telecom = getTelecomProvider();
+        isConfigured = isTelecomConfigured();
+        accountName = isConfigured ? `${telecom.name === "telnyx" ? "Telnyx" : "Twilio"} connected` : accountName;
       } else if (provider === "SHOPIFY") {
         isConfigured = isShopifyConfigured();
       } else {
@@ -41,11 +45,11 @@ export async function GET() {
       provider,
       label,
       status: row?.status ?? "NOT_CONNECTED",
-      accountName: row?.externalAccountName ?? null,
+      accountName,
       connectedAt: row?.connectedAt ?? null,
       lastSyncAt: row?.lastSyncAt ?? null,
       lastError: row?.lastError ?? null,
-      isConfigured, // whether real production credentials exist in env
+      isConfigured,
     };
   });
 
