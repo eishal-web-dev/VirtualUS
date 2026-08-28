@@ -16,7 +16,6 @@ export async function GET(req: Request) {
   return NextResponse.json({ error: "Verification failed" }, { status: 403 });
 }
 
-/** Routes each Messenger webhook entry by its Page ID to the owning tenant. */
 export async function POST(req: Request) {
   const rawBody = await req.text();
   const signature = req.headers.get("x-hub-signature-256");
@@ -43,17 +42,15 @@ export async function POST(req: Request) {
 
   try {
     const businessIds = new Set<string>();
-
     for (const entry of payload.entry ?? []) {
       if (!entry.id) continue;
-      const integration = await prisma.integration.findFirst({
-        where: { provider: "FACEBOOK", status: "CONNECTED", externalAccountId: entry.id },
+      const integration = await prisma.integration.findUnique({
+        where: { routingKey: `FACEBOOK:${entry.id}` },
       });
-      if (!integration) continue;
+      if (!integration || integration.status !== "CONNECTED") continue;
       businessIds.add(integration.businessId);
 
-      const messages = facebookProvider.parseWebhookPayload({ entry: [entry] });
-      for (const msg of messages) {
+      for (const msg of facebookProvider.parseWebhookPayload({ entry: [entry] })) {
         const customer = await resolveOrCreateCustomer({
           businessId: integration.businessId,
           platform: "FACEBOOK",
