@@ -4,10 +4,11 @@ import type { NextAuthConfig } from "next-auth";
  * Edge-safe subset of the NextAuth config: no Prisma adapter, no bcrypt
  * calls here. Prisma isn't Edge-runtime compatible, so `middleware.ts`
  * uses this config directly, while the full config (lib/auth.ts) adds the
- * Prisma adapter + Credentials `authorize()` for use in Node.js route
- * handlers.
+ * Credentials provider for use in Node.js route handlers.
  */
 export const authConfig: NextAuthConfig = {
+  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+  trustHost: true,
   session: { strategy: "jwt" },
   pages: {
     signIn: "/login",
