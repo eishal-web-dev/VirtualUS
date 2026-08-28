@@ -60,7 +60,6 @@ enum BusinessRole {
   AGENT
 }
 
-// Every external surface a conversation/message/customer identity can live on.
 enum Channel {
   PHONE
   SMS
@@ -133,7 +132,7 @@ enum NotificationType {
 }
 
 // ============================================================
-// Phase 1 models (unchanged shape; Call/PhoneNumber gain businessId)
+// Phase 1 models
 // ============================================================
 
 model User {
@@ -166,9 +165,9 @@ model PhoneNumber {
   user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   businessId  String?
   business    Business?         @relation(fields: [businessId], references: [id], onDelete: SetNull)
-  number      String            @unique // E.164 format, e.g. +13125551234
+  number      String            @unique
   provider    String            @default("twilio")
-  providerSid String            @unique // Twilio IncomingPhoneNumber SID
+  providerSid String            @unique
   areaCode    String
   status      PhoneNumberStatus @default(ACTIVE)
   createdAt   DateTime          @default(now())
@@ -193,7 +192,7 @@ model Call {
   from            String
   to              String
   status          CallStatus    @default(QUEUED)
-  duration        Int           @default(0) // seconds
+  duration        Int           @default(0)
   cost            Decimal?      @db.Decimal(10, 4)
   recordingUrl    String?
   notes           String?
@@ -216,16 +215,17 @@ model Business {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members      BusinessMember[]
-  phoneNumbers PhoneNumber[]
-  calls        Call[]
-  customers    Customer[]
-  conversations Conversation[]
-  integrations Integration[]
-  shopifyStore  ShopifyStore?
-  subscription  Subscription?
-  webhookEvents WebhookEvent[]
-  notifications Notification[]
+  members            BusinessMember[]
+  phoneNumbers       PhoneNumber[]
+  calls              Call[]
+  customers          Customer[]
+  customerIdentities CustomerIdentity[]
+  conversations      Conversation[]
+  integrations       Integration[]
+  shopifyStore        ShopifyStore?
+  subscription        Subscription?
+  webhookEvents       WebhookEvent[]
+  notifications       Notification[]
 
   @@map("businesses")
 }
@@ -261,18 +261,18 @@ model Subscription {
 // ============================================================
 
 model Customer {
-  id               String    @id @default(cuid())
-  businessId       String
-  business         Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  name             String?
-  email            String?
-  phone            String?
-  tags             String[]  @default([])
-  notes            String?
-  assignedUserId   String?
-  assignedUser     User?     @relation("CustomerAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
-  createdAt        DateTime  @default(now())
-  lastContactedAt  DateTime?
+  id              String   @id @default(cuid())
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name            String?
+  email           String?
+  phone           String?
+  tags            String[] @default([])
+  notes           String?
+  assignedUserId  String?
+  assignedUser    User?    @relation("CustomerAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime @default(now())
+  lastContactedAt DateTime?
 
   identities    CustomerIdentity[]
   conversations Conversation[]
@@ -283,42 +283,44 @@ model Customer {
   @@map("customers")
 }
 
-// Links one customer record to their identity on a specific channel, e.g.
-// Instagram @johnsmith and phone +1... both resolve to the same Customer.
 model CustomerIdentity {
   id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
   platform   Channel
-  externalId String // phone in E.164, Instagram/TikTok/X handle, Facebook PSID, Shopify customer id, etc.
+  externalId String
   username   String?
   phone      String?
   email      String?
   createdAt  DateTime @default(now())
 
-  @@unique([platform, externalId])
+  @@unique([businessId, platform, externalId])
+  @@index([businessId])
   @@index([customerId])
   @@map("customer_identities")
 }
 
 model Conversation {
-  id                    String             @id @default(cuid())
-  businessId            String
-  business              Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customerId            String
-  customer              Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  channel               Channel
+  id                     String             @id @default(cuid())
+  businessId             String
+  business               Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId             String
+  customer               Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  channel                Channel
   externalConversationId String?
-  assignedUserId        String?
-  assignedUser          User?              @relation("ConversationAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
-  status                ConversationStatus @default(OPEN)
-  unreadCount           Int                @default(0)
-  tags                  String[]           @default([])
-  lastMessageAt         DateTime?
-  createdAt             DateTime           @default(now())
+  assignedUserId         String?
+  assignedUser           User?              @relation("ConversationAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  status                 ConversationStatus @default(OPEN)
+  unreadCount            Int                @default(0)
+  tags                   String[]           @default([])
+  lastMessageAt          DateTime?
+  createdAt              DateTime           @default(now())
 
   messages Message[]
 
+  @@unique([businessId, customerId, channel])
   @@index([businessId])
   @@index([customerId])
   @@index([channel])
@@ -326,31 +328,32 @@ model Conversation {
 }
 
 model Message {
-  id                String         @id @default(cuid())
+  id                String           @id @default(cuid())
   conversationId    String
-  conversation      Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation      Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   customerId        String
   senderUserId      String?
-  senderUser        User?          @relation("MessageSender", fields: [senderUserId], references: [id], onDelete: SetNull)
+  senderUser        User?            @relation("MessageSender", fields: [senderUserId], references: [id], onDelete: SetNull)
   channel           Channel
   direction         MessageDirection
-  type              MessageType    @default(TEXT)
+  type              MessageType      @default(TEXT)
   body              String?
   attachmentUrl     String?
-  providerMessageId String?        @unique
-  status            MessageStatus  @default(QUEUED)
-  sentAt            DateTime       @default(now())
+  providerMessageId String?
+  status            MessageStatus    @default(QUEUED)
+  sentAt            DateTime         @default(now())
   deliveredAt       DateTime?
   readAt            DateTime?
-  createdAt         DateTime       @default(now())
+  createdAt         DateTime         @default(now())
 
+  @@unique([channel, providerMessageId])
   @@index([conversationId])
   @@index([customerId])
   @@map("messages")
 }
 
 // ============================================================
-// Integrations (WhatsApp, Facebook, Instagram, TikTok, X, Shopify)
+// Integrations
 // ============================================================
 
 model Integration {
@@ -361,7 +364,7 @@ model Integration {
   status               IntegrationStatus   @default(NOT_CONNECTED)
   externalAccountId    String?
   externalAccountName  String?
-  encryptedCredentials String? // AES-256-GCM encrypted JSON blob; never sent to the client
+  encryptedCredentials String?
   config               Json?
   connectedAt          DateTime?
   lastSyncAt           DateTime?
@@ -370,17 +373,18 @@ model Integration {
   updatedAt            DateTime            @updatedAt
 
   @@unique([businessId, provider])
+  @@unique([provider, externalAccountId])
   @@map("integrations")
 }
 
 model ShopifyStore {
-  id                    String    @id @default(cuid())
-  businessId            String    @unique
-  business              Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  shopDomain            String    @unique
-  accessTokenEncrypted  String?
-  connectedAt           DateTime?
-  lastSyncAt            DateTime?
+  id                   String   @id @default(cuid())
+  businessId           String   @unique
+  business             Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  shopDomain           String   @unique
+  accessTokenEncrypted String?
+  connectedAt          DateTime?
+  lastSyncAt           DateTime?
 
   shopifyCustomers ShopifyCustomer[]
 
@@ -388,33 +392,36 @@ model ShopifyStore {
 }
 
 model ShopifyCustomer {
-  id               String       @id @default(cuid())
-  shopifyStoreId   String
-  shopifyStore     ShopifyStore @relation(fields: [shopifyStoreId], references: [id], onDelete: Cascade)
-  customerId       String?
-  customer         Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  shopifyCustomerId String      @unique
-  email            String?
-  phone            String?
-  totalSpent       Decimal      @default(0) @db.Decimal(10, 2)
-  ordersCount      Int          @default(0)
+  id                String       @id @default(cuid())
+  shopifyStoreId    String
+  shopifyStore      ShopifyStore @relation(fields: [shopifyStoreId], references: [id], onDelete: Cascade)
+  customerId        String?
+  customer          Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  shopifyCustomerId String
+  email             String?
+  phone             String?
+  totalSpent        Decimal      @default(0) @db.Decimal(10, 2)
+  ordersCount       Int          @default(0)
 
   orders ShopifyOrder[]
 
+  @@unique([shopifyStoreId, shopifyCustomerId])
+  @@index([customerId])
   @@map("shopify_customers")
 }
 
 model ShopifyOrder {
-  id                 String          @id @default(cuid())
-  shopifyCustomerId  String
-  shopifyCustomer    ShopifyCustomer @relation(fields: [shopifyCustomerId], references: [id], onDelete: Cascade)
-  shopifyOrderId     String          @unique
-  orderNumber        String
-  totalPrice         Decimal         @db.Decimal(10, 2)
-  financialStatus    String?
-  fulfillmentStatus  String?
-  createdAt          DateTime        @default(now())
+  id                String          @id @default(cuid())
+  shopifyCustomerId String
+  shopifyCustomer   ShopifyCustomer @relation(fields: [shopifyCustomerId], references: [id], onDelete: Cascade)
+  shopifyOrderId    String
+  orderNumber       String
+  totalPrice        Decimal         @db.Decimal(10, 2)
+  financialStatus   String?
+  fulfillmentStatus String?
+  createdAt         DateTime        @default(now())
 
+  @@unique([shopifyCustomerId, shopifyOrderId])
   @@map("shopify_orders")
 }
 
