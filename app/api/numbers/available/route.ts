@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireTenant } from "@/lib/tenant";
 import { areaCodeSchema } from "@/lib/validation";
-import { getTelecomProvider } from "@/lib/telecom";
+import { getTelecomProvider, isTelecomConfigured } from "@/lib/telecom";
 
 export async function GET(req: Request) {
   const tenant = await requireTenant();
@@ -18,11 +18,12 @@ export async function GET(req: Request) {
     );
   }
 
-  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+  if (!isTelecomConfigured()) {
     return NextResponse.json(
       {
-        error: "Phone service is not connected yet. Add the Ashes Twilio Account SID and Auth Token to the production environment.",
+        error: "Phone service is not connected yet. Add the Telnyx API key to the Ashes Connect production environment.",
         providerSetupRequired: true,
+        provider: getTelecomProvider().name,
       },
       { status: 503 }
     );
@@ -31,7 +32,7 @@ export async function GET(req: Request) {
   try {
     const provider = getTelecomProvider();
     const numbers = await provider.searchAvailableNumbers(parsed.data, 10);
-    return NextResponse.json({ numbers });
+    return NextResponse.json({ numbers, provider: provider.name });
   } catch (err) {
     console.error("[numbers/available] provider error", err);
     return NextResponse.json(
