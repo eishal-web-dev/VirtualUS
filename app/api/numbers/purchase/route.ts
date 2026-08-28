@@ -31,10 +31,12 @@ export async function POST(req: Request) {
     );
   }
 
-  const baseUrl = process.env.APP_BASE_URL ?? process.env.NEXTAUTH_URL;
-  if (!baseUrl) {
-    return NextResponse.json({ error: "Server misconfigured: APP_BASE_URL is not set" }, { status: 500 });
-  }
+  // Use an explicit env override when present, but keep production usable without
+  // requiring a separate APP_BASE_URL variable in Vercel.
+  const baseUrl =
+    process.env.APP_BASE_URL ??
+    process.env.NEXTAUTH_URL ??
+    "https://ashes-connect-app.vercel.app";
 
   const provider = getTelecomProvider();
   let provisioned: { phoneNumber: string; providerSid: string } | null = null;
