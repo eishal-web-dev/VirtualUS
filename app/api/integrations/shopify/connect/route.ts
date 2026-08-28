@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireTenant, requireRole } from "@/lib/tenant";
 import { normalizeShopDomain, buildAuthorizeUrl, isConfigured } from "@/lib/shopify";
+import { createOAuthState } from "@/lib/oauth-state";
 import { z } from "zod";
 
 const schema = z.object({ shopDomain: z.string().min(3).max(200) });
@@ -36,8 +37,13 @@ export async function POST(req: Request) {
   }
 
   const baseUrl = process.env.APP_BASE_URL ?? process.env.NEXTAUTH_URL;
+  if (!baseUrl) {
+    return NextResponse.json({ error: "Server misconfigured: APP_BASE_URL is not set" }, { status: 500 });
+  }
+
   const redirectUri = `${baseUrl}/api/integrations/shopify/callback`;
-  const redirectUrl = buildAuthorizeUrl(shopDomain, tenant.businessId, redirectUri);
+  const state = createOAuthState(tenant.businessId, "SHOPIFY");
+  const redirectUrl = buildAuthorizeUrl(shopDomain, state, redirectUri);
 
   return NextResponse.json({ redirectUrl });
 }
