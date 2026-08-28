@@ -42,6 +42,7 @@ export async function GET(req: Request) {
     if (!phoneNumberId || !businessAccountId) {
       throw new Error("WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_BUSINESS_ACCOUNT_ID are not configured");
     }
+    const routingKey = `WHATSAPP:${businessAccountId}`;
 
     await prisma.integration.upsert({
       where: { businessId_provider: { businessId, provider: "WHATSAPP" } },
@@ -51,6 +52,7 @@ export async function GET(req: Request) {
         status: "CONNECTED",
         externalAccountId: businessAccountId,
         externalAccountName: accountName,
+        routingKey,
         encryptedCredentials: encryptCredentials({ accessToken: longLived.accessToken }),
         config: { phoneNumberId, businessAccountId },
         connectedAt: new Date(),
@@ -61,6 +63,7 @@ export async function GET(req: Request) {
         status: "CONNECTED",
         externalAccountId: businessAccountId,
         externalAccountName: accountName,
+        routingKey,
         encryptedCredentials: encryptCredentials({ accessToken: longLived.accessToken }),
         config: { phoneNumberId, businessAccountId },
         connectedAt: new Date(),
