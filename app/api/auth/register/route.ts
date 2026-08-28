@@ -28,9 +28,10 @@ export async function POST(req: Request) {
 
   const passwordHash = await hashPassword(password);
 
-  // Every signup creates its own tenant (Business) with the signer as
-  // OWNER. This is the seam all business-scoped data hangs off of.
-  const user = await prisma.$transaction(async (tx: typeof prisma) => {
+  // Let Prisma infer its TransactionClient here. Annotating it as the full
+  // PrismaClient is incorrect because transaction clients intentionally omit
+  // $connect/$disconnect/$transaction and caused production type-check errors.
+  const user = await prisma.$transaction(async (tx) => {
     const created = await tx.user.create({
       data: { name, email, passwordHash, businessName, country },
       select: { id: true, email: true, name: true },
