@@ -98,7 +98,7 @@ export function Dialer() {
         </Card>
       )}
 
-      <Card className="mx-auto max-w-sm p-6">
+      <Card className="mx-auto max-w-sm p-6 shadow-glow">
         <Input
           value={destination}
           onChange={(e) => setDestination(e.target.value)}
@@ -112,7 +112,7 @@ export function Dialer() {
             <button
               key={key}
               onClick={() => handleKeyPress(key)}
-              className="aspect-square rounded-xl border border-black/[.08] bg-white text-xl font-medium text-ink transition-colors hover:bg-black/[.03] active:bg-black/[.06]"
+              className="aspect-square rounded-xl border border-black/[.08] bg-white text-xl font-medium text-ink transition-all duration-150 hover:scale-[1.03] hover:border-brand-200 hover:bg-brand-50 active:scale-95"
             >
               {key}
             </button>
@@ -137,6 +137,7 @@ export function Dialer() {
             <Button
               onClick={handleCall}
               disabled={!ready || !destination}
+              variant="gradient"
               className="w-full"
               size="lg"
             >
@@ -168,7 +169,13 @@ function CallStatusLine({ callState, seconds }: { callState: string; seconds: nu
     failed: "red",
   };
 
-  return <Badge tone={tones[callState] ?? "neutral"}>{labels[callState] ?? callState}</Badge>;
+  const pulsing = callState === "connecting" || callState === "ringing";
+
+  return (
+    <Badge tone={tones[callState] ?? "neutral"} className={pulsing ? "animate-pulse-soft" : "animate-fade-in"}>
+      {labels[callState] ?? callState}
+    </Badge>
+  );
 }
 
 function formatTimer(seconds: number) {

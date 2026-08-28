@@ -139,7 +139,7 @@ export function InboxClient({ channelFilter }: { channelFilter?: string }) {
                 onClick={() => setFilter(f.key)}
                 className={clsx(
                   "rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
-                  filter === f.key ? "bg-ink text-white" : "bg-black/[.04] text-black/60 hover:bg-black/[.08]"
+                  filter === f.key ? "bg-brand-gradient text-white shadow-sm" : "bg-black/[.04] text-black/60 hover:bg-black/[.08]"
                 )}
               >
                 {f.label}
@@ -149,7 +149,19 @@ export function InboxClient({ channelFilter }: { channelFilter?: string }) {
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {conversations === null && <p className="p-4 text-sm text-black/40">Loading…</p>}
+          {conversations === null && (
+            <div className="space-y-0">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div key={i} className="flex items-start gap-3 border-b border-black/[.04] p-3">
+                  <div className="skeleton h-9 w-9 shrink-0 rounded-full" />
+                  <div className="min-w-0 flex-1 space-y-2 pt-0.5">
+                    <div className="skeleton h-3 w-2/3 rounded" />
+                    <div className="skeleton h-2.5 w-4/5 rounded" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           {conversations !== null && conversations.length === 0 && (
             <div className="p-6 text-center text-sm text-black/40">No conversations yet.</div>
           )}
@@ -186,7 +198,7 @@ export function InboxClient({ channelFilter }: { channelFilter?: string }) {
                   <div className="mt-1 flex items-center gap-2">
                     {c.assignedUser && <span className="text-[11px] text-black/35">{c.assignedUser.name}</span>}
                     {c.unreadCount > 0 && (
-                      <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-ink px-1 text-[10px] font-semibold text-white">
+                      <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-gradient px-1 text-[10px] font-semibold text-white">
                         {c.unreadCount}
                       </span>
                     )}
@@ -218,14 +230,14 @@ export function InboxClient({ channelFilter }: { channelFilter?: string }) {
 
             <div className="flex-1 space-y-3 overflow-y-auto p-4">
               {detail.messages.map((m) => (
-                <div key={m.id} className={clsx("flex", m.direction === "OUTBOUND" ? "justify-end" : "justify-start")}>
+                <div key={m.id} className={clsx("flex animate-fade-in", m.direction === "OUTBOUND" ? "justify-end" : "justify-start")}>
                   <div
                     className={clsx(
-                      "max-w-[75%] rounded-2xl px-3.5 py-2 text-sm",
+                      "max-w-[75%] rounded-2xl px-3.5 py-2 text-sm shadow-sm",
                       m.type === "CALL_EVENT"
                         ? "bg-blue-50 text-blue-700"
                         : m.direction === "OUTBOUND"
-                          ? "bg-ink text-white"
+                          ? "bg-brand-gradient text-white"
                           : "bg-black/[.05] text-ink"
                     )}
                   >

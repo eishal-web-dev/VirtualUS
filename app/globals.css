@@ -14,6 +14,43 @@ body {
 
 @layer utilities {
   .card {
-    @apply rounded-xl border border-black/[.08] bg-white shadow-card;
+    @apply rounded-xl border border-black/[.08] bg-white shadow-card transition-shadow duration-200;
   }
+
+  .card-interactive {
+    @apply card hover:shadow-card-hover hover:border-black/[.14] transition-all duration-200;
+  }
+
+  .skeleton {
+    @apply relative overflow-hidden bg-black/[.05];
+    background-image: linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.05) 25%,
+      rgba(0, 0, 0, 0.09) 37%,
+      rgba(0, 0, 0, 0.05) 63%
+    );
+    background-size: 400% 100%;
+    animation: shimmer 1.4s ease infinite;
+  }
+
+  .animate-delay-75 {
+    animation-delay: 75ms;
+  }
+  .animate-delay-150 {
+    animation-delay: 150ms;
+  }
+  .animate-delay-225 {
+    animation-delay: 225ms;
+  }
+  .animate-delay-300 {
+    animation-delay: 300ms;
+  }
+}
+
+* {
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+
+::selection {
+  background: rgba(74, 99, 245, 0.18);
 }

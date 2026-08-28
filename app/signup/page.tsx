@@ -53,9 +53,13 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-6 py-12">
-      <Card className="w-full max-w-sm p-8">
-        <h1 className="text-xl font-semibold">Create your account</h1>
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-6 py-12">
+      <div className="absolute inset-0 -z-10 bg-mesh-radial" />
+      <Card className="w-full max-w-sm animate-scale-in p-8 shadow-glow">
+        <Link href="/" className="bg-brand-gradient bg-clip-text text-sm font-semibold text-transparent">
+          Ashes Connect
+        </Link>
+        <h1 className="mt-3 text-xl font-semibold">Create your account</h1>
         <p className="mt-1 text-sm text-black/60">Get your US number in a couple minutes.</p>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
@@ -95,7 +99,7 @@ export default function SignupPage() {
 
           {error && <p className="text-sm text-red-600">{error}</p>}
 
-          <Button type="submit" disabled={loading} className="w-full">
+          <Button type="submit" variant="gradient" disabled={loading} className="w-full">
             {loading ? "Creating account…" : "Create account"}
           </Button>
         </form>

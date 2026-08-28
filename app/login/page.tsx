@@ -44,7 +44,7 @@ function LoginForm() {
   }
 
   return (
-    <Card className="w-full max-w-sm p-8">
+    <Card className="w-full max-w-sm animate-scale-in p-8 shadow-glow">
       <h1 className="text-xl font-semibold">Log in</h1>
       <p className="mt-1 text-sm text-black/60">Welcome back.</p>
 
@@ -74,7 +74,7 @@ function LoginForm() {
 
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-        <Button type="submit" disabled={loading} className="w-full">
+        <Button type="submit" variant="gradient" disabled={loading} className="w-full">
           {loading ? "Logging in…" : "Log in"}
         </Button>
       </form>
@@ -91,7 +91,8 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <div className="flex min-h-screen items-center justify-center px-6 py-12">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-6 py-12">
+      <div className="absolute inset-0 -z-10 bg-mesh-radial" />
       <Suspense fallback={<div className="text-sm text-black/40">Loading…</div>}>
         <LoginForm />
       </Suspense>

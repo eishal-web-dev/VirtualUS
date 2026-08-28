@@ -53,8 +53,10 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
     <Link
       href={item.href}
       className={clsx(
-        "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-        active ? "bg-ink text-white" : "text-black/60 hover:bg-black/[.04] hover:text-ink"
+        "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200",
+        active
+          ? "bg-brand-gradient text-white shadow-sm"
+          : "text-black/60 hover:translate-x-0.5 hover:bg-black/[.04] hover:text-ink"
       )}
     >
       <Icon size={16} strokeWidth={2} />
@@ -70,7 +72,7 @@ export function Sidebar() {
   return (
     <aside className="flex h-full w-60 shrink-0 flex-col overflow-y-auto border-r border-black/[.06] bg-white">
       <div className="px-5 py-5">
-        <Link href="/" className="text-lg font-semibold tracking-tight">
+        <Link href="/" className="bg-brand-gradient bg-clip-text text-lg font-semibold tracking-tight text-transparent">
           Ashes Connect
         </Link>
       </div>
