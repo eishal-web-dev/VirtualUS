@@ -3,11 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { whatsAppProvider } from "@/lib/messaging/whatsapp";
 import { resolveOrCreateCustomer, recordMessage } from "@/lib/inbox";
 
-/**
- * GET — Meta's webhook verification handshake. Configure this exact URL
- * as the WhatsApp webhook Callback URL in the Meta App dashboard, with
- * Verify Token = META_VERIFY_TOKEN.
- */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const mode = searchParams.get("hub.mode");
@@ -17,31 +12,21 @@ export async function GET(req: Request) {
   if (mode === "subscribe" && token === process.env.META_VERIFY_TOKEN && challenge) {
     return new NextResponse(challenge, { status: 200 });
   }
-
   return NextResponse.json({ error: "Verification failed" }, { status: 403 });
 }
 
-/**
- * POST — inbound WhatsApp messages from Meta.
- *
- * NOTE: this MVP uses a single set of app-level WhatsApp credentials
- * (WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_BUSINESS_ACCOUNT_ID) rather than
- * per-business OAuth-issued tokens, so inbound messages are routed to the
- * first business with a WhatsApp integration on record. A production,
- * multi-business rollout needs Meta System User tokens per business and
- * should key this lookup off the `phone_number_id` in the payload against
- * `Integration.externalAccountId`.
- */
+/** Routes WhatsApp webhook entries by WABA id to the owning tenant. */
 export async function POST(req: Request) {
   const rawBody = await req.text();
   const signature = req.headers.get("x-hub-signature-256");
+  const validSignature = whatsAppProvider.validateWebhookSignature({ payload: rawBody, signatureHeader: signature });
 
-  const validSignature = whatsAppProvider.validateWebhookSignature({
-    payload: rawBody,
-    signatureHeader: signature,
-  });
-
-  const payload = JSON.parse(rawBody);
+  let payload: { entry?: Array<{ id?: string; changes?: unknown[] }> };
+  try {
+    payload = JSON.parse(rawBody);
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
 
   const webhookEvent = await prisma.webhookEvent.create({
     data: { provider: "whatsapp", payload, status: "RECEIVED" },
@@ -56,13 +41,17 @@ export async function POST(req: Request) {
   }
 
   try {
-    const integration = await prisma.integration.findFirst({
-      where: { provider: "WHATSAPP", status: { in: ["CONNECTED", "MOCK"] } },
-      orderBy: { connectedAt: "asc" },
-    });
+    const businessIds = new Set<string>();
 
-    if (integration) {
-      const messages = whatsAppProvider.parseWebhookPayload(payload);
+    for (const entry of payload.entry ?? []) {
+      if (!entry.id) continue;
+      const integration = await prisma.integration.findFirst({
+        where: { provider: "WHATSAPP", status: "CONNECTED", externalAccountId: entry.id },
+      });
+      if (!integration) continue;
+      businessIds.add(integration.businessId);
+
+      const messages = whatsAppProvider.parseWebhookPayload({ entry: [entry] });
       for (const msg of messages) {
         const customer = await resolveOrCreateCustomer({
           businessId: integration.businessId,
@@ -71,7 +60,6 @@ export async function POST(req: Request) {
           name: msg.fromName,
           phone: msg.from,
         });
-
         await recordMessage({
           businessId: integration.businessId,
           customerId: customer.id,
@@ -87,7 +75,11 @@ export async function POST(req: Request) {
 
     await prisma.webhookEvent.update({
       where: { id: webhookEvent.id },
-      data: { status: "PROCESSED", processedAt: new Date() },
+      data: {
+        businessId: businessIds.size === 1 ? [...businessIds][0] : null,
+        status: "PROCESSED",
+        processedAt: new Date(),
+      },
     });
   } catch (err) {
     await prisma.webhookEvent.update({
@@ -96,6 +88,5 @@ export async function POST(req: Request) {
     });
   }
 
-  // Meta requires a fast 200 regardless of processing outcome.
   return NextResponse.json({ received: true });
 }
