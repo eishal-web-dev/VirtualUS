@@ -18,6 +18,16 @@ export async function GET(req: Request) {
     );
   }
 
+  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+    return NextResponse.json(
+      {
+        error: "Phone service is not connected yet. Add the Ashes Twilio Account SID and Auth Token to the production environment.",
+        providerSetupRequired: true,
+      },
+      { status: 503 }
+    );
+  }
+
   try {
     const provider = getTelecomProvider();
     const numbers = await provider.searchAvailableNumbers(parsed.data, 10);
