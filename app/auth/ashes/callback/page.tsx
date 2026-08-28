@@ -7,11 +7,13 @@ import { signIn } from "next-auth/react";
 function CallbackLauncher() {
   const searchParams = useSearchParams();
   const [message, setMessage] = useState("Signing you into Ashes Connect…");
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     const code = searchParams.get("code");
     if (!code) {
-      window.location.replace("https://www.ashesstack.cloud/connect");
+      setFailed(true);
+      setMessage("This Ashes sign-in link is missing or expired.");
       return;
     }
 
@@ -29,10 +31,8 @@ function CallbackLauncher() {
         window.location.replace("/dashboard");
       } catch {
         if (!cancelled) {
-          setMessage("Your Ashes sign-in expired. Sending you back to Ashes…");
-          window.setTimeout(() => {
-            window.location.replace("https://www.ashesstack.cloud/connect");
-          }, 900);
+          setFailed(true);
+          setMessage("Ashes verified your account, but Connect could not create its session. The Connect server setup still needs to be completed.");
         }
       }
     }
@@ -47,6 +47,14 @@ function CallbackLauncher() {
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-black/40">Ashes account</p>
         <h1 className="mt-3 text-xl font-semibold">Ashes Connect</h1>
         <p className="mt-2 text-sm text-black/60">{message}</p>
+        {failed && (
+          <a
+            className="mt-6 inline-flex rounded-full border border-black/15 px-4 py-2 text-sm font-medium"
+            href="https://www.ashesstack.cloud/connect"
+          >
+            Try again from Ashes
+          </a>
+        )}
       </div>
     </div>
   );
