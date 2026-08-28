@@ -1,6 +1,5 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import { verifyPassword } from "@/lib/password";
 import { authConfig } from "@/lib/auth.config";
@@ -11,9 +10,11 @@ const credentialsSchema = z.object({
   password: z.string().min(1),
 });
 
+// Ashes Connect uses credentials + JWT sessions and creates users through our
+// own registration route. A database Auth.js adapter is therefore unnecessary
+// (and would require Account/Session/VerificationToken models we don't use).
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
-  adapter: PrismaAdapter(prisma),
   providers: [
     Credentials({
       name: "Credentials",
@@ -26,18 +27,13 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         if (!parsed.success) return null;
 
         const { email, password } = parsed.data;
-
         const user = await prisma.user.findUnique({ where: { email } });
         if (!user) return null;
 
         const valid = await verifyPassword(password, user.passwordHash);
         if (!valid) return null;
 
-        return {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-        };
+        return { id: user.id, name: user.name, email: user.email };
       },
     }),
   ],
