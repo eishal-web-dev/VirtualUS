@@ -12,12 +12,14 @@ function safeDiagnostics() {
   try {
     const cleaned = raw.replace(/^DATABASE_URL\s*=\s*/i, "").trim().replace(/^['\"`]|['\"`]$/g, "");
     const url = new URL(cleaned);
+    const password = decodeURIComponent(url.password || "");
     database = {
       configured: true,
       username: decodeURIComponent(url.username),
       hostname: url.hostname,
       port: url.port,
-      passwordLength: decodeURIComponent(url.password || "").length,
+      passwordLength: password.length,
+      passwordLooksLikePlaceholder: /^(?:\[?YOUR[-_ ]?PASSWORD\]?|PASSWORD|DB[-_ ]?PASSWORD)$/i.test(password),
     };
   } catch {
     database = { configured: Boolean(raw), parseable: false };
