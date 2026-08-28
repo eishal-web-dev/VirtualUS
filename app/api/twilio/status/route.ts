@@ -26,44 +26,39 @@ export async function POST(req: Request) {
 
   const signature = req.headers.get("x-twilio-signature");
   const provider = getTelecomProvider();
-  const url = process.env.APP_BASE_URL
-    ? `${process.env.APP_BASE_URL}/api/twilio/status`
-    : req.url;
-
-  const validSignature = provider.validateWebhookSignature({
-    url,
-    params,
-    signatureHeader: signature,
-  });
+  const url = process.env.APP_BASE_URL ? `${process.env.APP_BASE_URL}/api/twilio/status` : req.url;
+  const validSignature = provider.validateWebhookSignature({ url, params, signatureHeader: signature });
 
   if (!validSignature && process.env.NODE_ENV === "production") {
     return new NextResponse("Invalid signature", { status: 403 });
   }
 
+  // <Dial action> sends DialCallStatus / DialCallDuration while ordinary
+  // status callbacks use CallStatus / CallDuration. The CallSid remains the
+  // parent call SID we store in our database.
   const callSid = params.CallSid;
-  const rawStatus = params.CallStatus;
-  const durationSeconds = params.CallDuration ? Number(params.CallDuration) : undefined;
-  const price = params.Price ? Math.abs(Number(params.Price)) : undefined;
+  const rawStatus = params.DialCallStatus ?? params.CallStatus;
+  const rawDuration = params.DialCallDuration ?? params.CallDuration;
+  const durationSeconds = rawDuration && Number.isFinite(Number(rawDuration)) ? Number(rawDuration) : undefined;
+  const rawPrice = params.Price ? Number(params.Price) : undefined;
+  const price = rawPrice !== undefined && Number.isFinite(rawPrice) ? Math.abs(rawPrice) : undefined;
 
   if (callSid && rawStatus && STATUS_MAP[rawStatus]) {
     const existing = await prisma.call.findUnique({ where: { providerCallSid: callSid } });
     if (existing) {
+      const terminal = ["completed", "busy", "failed", "no-answer", "canceled"].includes(rawStatus);
       await prisma.call.update({
         where: { providerCallSid: callSid },
         data: {
           status: STATUS_MAP[rawStatus],
           duration: durationSeconds ?? existing.duration,
           cost: price ?? existing.cost ?? undefined,
-          endedAt: ["completed", "busy", "failed", "no-answer", "canceled"].includes(rawStatus)
-            ? new Date()
-            : existing.endedAt,
+          endedAt: terminal ? new Date() : existing.endedAt,
         },
       });
     }
   }
 
-  // This endpoint doubles as the <Dial action> callback, which expects a
-  // TwiML response. An empty <Response/> tells Twilio "no further action".
   const response = new VoiceResponse();
   return new NextResponse(response.toString(), {
     status: 200,
