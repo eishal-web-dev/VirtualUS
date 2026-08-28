@@ -13,6 +13,12 @@ type AvailableNumber = {
   areaCode: string;
 };
 
+type ExistingTelnyxNumber = {
+  id: string;
+  phoneNumber: string;
+  status: string | null;
+};
+
 type OwnedNumber = {
   id: string;
   number: string;
@@ -31,17 +37,27 @@ const AREA_CODES = [
 
 export default function NumbersPage() {
   const [owned, setOwned] = useState<OwnedNumber | null | undefined>(undefined);
+  const [existing, setExisting] = useState<ExistingTelnyxNumber[]>([]);
   const [areaCode, setAreaCode] = useState("312");
   const [results, setResults] = useState<AvailableNumber[]>([]);
   const [searching, setSearching] = useState(false);
   const [purchasing, setPurchasing] = useState<string | null>(null);
+  const [importing, setImporting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/numbers/me")
-      .then((r) => r.json())
-      .then((data) => setOwned(data.phoneNumber))
-      .catch(() => setOwned(null));
+    Promise.all([
+      fetch("/api/numbers/me").then((r) => r.json()),
+      fetch("/api/numbers/existing").then((r) => (r.ok ? r.json() : { numbers: [] })),
+    ])
+      .then(([mine, carrier]) => {
+        setOwned(mine.phoneNumber);
+        setExisting(carrier.numbers ?? []);
+      })
+      .catch(() => {
+        setOwned(null);
+        setExisting([]);
+      });
   }, []);
 
   async function search(code: string) {
@@ -57,6 +73,27 @@ export default function NumbersPage() {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setSearching(false);
+    }
+  }
+
+  async function importExisting(n: ExistingTelnyxNumber) {
+    setImporting(n.id);
+    setError(null);
+    try {
+      const res = await fetch("/api/numbers/import-existing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: n.id, phoneNumber: n.phoneNumber }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Import failed");
+      setOwned(data.phoneNumber);
+      setExisting([]);
+      setResults([]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setImporting(null);
     }
   }
 
@@ -112,6 +149,33 @@ export default function NumbersPage() {
         <p className="mt-1 text-sm text-black/60">Search a US area code and claim your number.</p>
       </div>
 
+      {existing.length > 0 && (
+        <Card className="p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="font-medium">Existing Telnyx number found</h2>
+              <p className="mt-1 text-sm text-black/50">
+                Ashes Connect fetched the number already owned by this Telnyx account. You can use it without placing another order.
+              </p>
+            </div>
+            <Badge tone="blue">Telnyx</Badge>
+          </div>
+          <div className="mt-4 space-y-2">
+            {existing.map((n) => (
+              <div key={n.id} className="flex items-center justify-between rounded-lg border border-black/[.08] px-4 py-3">
+                <div>
+                  <p className="font-medium">{n.phoneNumber}</p>
+                  <p className="text-xs text-black/40">{n.status ?? "Owned in Telnyx"}</p>
+                </div>
+                <Button size="sm" onClick={() => importExisting(n)} disabled={importing === n.id}>
+                  {importing === n.id ? "Connecting…" : "Use this number"}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <Card className="p-6">
         <div className="flex flex-wrap items-center gap-2">
           {AREA_CODES.map((ac) => (
@@ -140,7 +204,7 @@ export default function NumbersPage() {
         <div className="mt-6">
           {searching && <p className="text-sm text-black/40">Searching for available numbers…</p>}
 
-          {!searching && results.length === 0 && !error && (
+          {!searching && results.length === 0 && !error && existing.length === 0 && (
             <p className="text-sm text-black/40">Pick an area code above to search available numbers.</p>
           )}
 
