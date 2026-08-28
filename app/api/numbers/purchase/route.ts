@@ -4,6 +4,38 @@ import { prisma } from "@/lib/prisma";
 import { purchaseNumberSchema } from "@/lib/validation";
 import { getTelecomProvider } from "@/lib/telecom";
 
+function provisioningError(err: unknown): { message: string; status: number } {
+  const raw = err instanceof Error ? err.message : "";
+  const normalized = raw.toLowerCase();
+
+  if (normalized.includes("only 1 order is allowed at your account level")) {
+    return {
+      message:
+        "Telnyx has reached the phone-number order limit on this account. Open Telnyx and upgrade/verify the account (or use the number from the existing Telnyx order), then try again.",
+      status: 409,
+    };
+  }
+
+  if (normalized.includes("insufficient") && normalized.includes("balance")) {
+    return {
+      message: "Your Telnyx account does not have enough balance to buy this number. Add funds in Telnyx and try again.",
+      status: 402,
+    };
+  }
+
+  if (normalized.includes("verification") || normalized.includes("verify your account")) {
+    return {
+      message: "Telnyx requires additional account verification before this number can be purchased.",
+      status: 403,
+    };
+  }
+
+  return {
+    message: "Could not provision this number. It may have just been taken — try another.",
+    status: 502,
+  };
+}
+
 export async function POST(req: Request) {
   const tenant = await requireTenant();
   if (tenant instanceof NextResponse) return tenant;
@@ -31,8 +63,6 @@ export async function POST(req: Request) {
     );
   }
 
-  // Use an explicit env override when present, but keep production usable without
-  // requiring a separate APP_BASE_URL variable in Vercel.
   const baseUrl =
     process.env.APP_BASE_URL ??
     process.env.NEXTAUTH_URL ??
@@ -69,9 +99,8 @@ export async function POST(req: Request) {
         console.error("[numbers/purchase] rollback release failed", releaseErr);
       }
     }
-    return NextResponse.json(
-      { error: "Could not provision this number. It may have just been taken — try another." },
-      { status: 502 }
-    );
+
+    const mapped = provisioningError(err);
+    return NextResponse.json({ error: mapped.message }, { status: mapped.status });
   }
 }
