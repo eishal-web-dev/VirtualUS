@@ -15,16 +15,19 @@ export async function GET(req: Request) {
   return NextResponse.json({ error: "Verification failed" }, { status: 403 });
 }
 
+/** Routes each Instagram webhook entry by professional account ID. */
 export async function POST(req: Request) {
   const rawBody = await req.text();
   const signature = req.headers.get("x-hub-signature-256");
+  const validSignature = instagramProvider.validateWebhookSignature({ payload: rawBody, signatureHeader: signature });
 
-  const validSignature = instagramProvider.validateWebhookSignature({
-    payload: rawBody,
-    signatureHeader: signature,
-  });
+  let payload: { entry?: Array<{ id?: string; messaging?: unknown[] }> };
+  try {
+    payload = JSON.parse(rawBody);
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
 
-  const payload = JSON.parse(rawBody);
   const webhookEvent = await prisma.webhookEvent.create({
     data: { provider: "instagram", payload, status: "RECEIVED" },
   });
@@ -38,20 +41,23 @@ export async function POST(req: Request) {
   }
 
   try {
-    const integration = await prisma.integration.findFirst({
-      where: { provider: "INSTAGRAM", status: { in: ["CONNECTED", "MOCK"] } },
-      orderBy: { connectedAt: "asc" },
-    });
+    const businessIds = new Set<string>();
 
-    if (integration) {
-      const messages = instagramProvider.parseWebhookPayload(payload);
+    for (const entry of payload.entry ?? []) {
+      if (!entry.id) continue;
+      const integration = await prisma.integration.findFirst({
+        where: { provider: "INSTAGRAM", status: "CONNECTED", externalAccountId: entry.id },
+      });
+      if (!integration) continue;
+      businessIds.add(integration.businessId);
+
+      const messages = instagramProvider.parseWebhookPayload({ entry: [entry] });
       for (const msg of messages) {
         const customer = await resolveOrCreateCustomer({
           businessId: integration.businessId,
           platform: "INSTAGRAM",
           externalId: msg.from,
         });
-
         await recordMessage({
           businessId: integration.businessId,
           customerId: customer.id,
@@ -66,7 +72,11 @@ export async function POST(req: Request) {
 
     await prisma.webhookEvent.update({
       where: { id: webhookEvent.id },
-      data: { status: "PROCESSED", processedAt: new Date() },
+      data: {
+        businessId: businessIds.size === 1 ? [...businessIds][0] : null,
+        status: "PROCESSED",
+        processedAt: new Date(),
+      },
     });
   } catch (err) {
     await prisma.webhookEvent.update({
