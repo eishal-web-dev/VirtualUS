@@ -2,7 +2,9 @@ import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { decryptCredentials } from "@/lib/crypto";
 
-const SHOPIFY_API_VERSION = "2024-10";
+// Current stable Admin API for August 2026. New public Shopify apps must use
+// GraphQL Admin API rather than the legacy REST Admin API.
+const SHOPIFY_API_VERSION = "2026-07";
 const REQUIRED_SCOPES = "read_customers,read_orders";
 
 export function isConfigured(): boolean {
@@ -25,11 +27,9 @@ export function buildAuthorizeUrl(shopDomain: string, state: string, redirectUri
   return `https://${shopDomain}/admin/oauth/authorize?${params.toString()}`;
 }
 
-/** Verifies Shopify's HMAC on OAuth callback / webhook query params. */
 export function verifyShopifyHmac(params: URLSearchParams): boolean {
   const secret = process.env.SHOPIFY_API_SECRET;
   if (!secret) return false;
-
   const hmac = params.get("hmac");
   if (!hmac) return false;
 
@@ -38,11 +38,11 @@ export function verifyShopifyHmac(params: URLSearchParams): boolean {
     if (key !== "hmac" && key !== "signature") pairs.push(`${key}=${value}`);
   });
   pairs.sort();
-  const message = pairs.join("&");
-
-  const digest = crypto.createHmac("sha256", secret).update(message).digest("hex");
+  const digest = crypto.createHmac("sha256", secret).update(pairs.join("&")).digest("hex");
   try {
-    return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(hmac));
+    const a = Buffer.from(digest, "utf8");
+    const b = Buffer.from(hmac, "utf8");
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
   } catch {
     return false;
   }
@@ -58,105 +58,139 @@ export async function exchangeShopifyCode(shopDomain: string, code: string): Pro
       code,
     }),
   });
-  if (!res.ok) {
-    throw new Error(`Shopify token exchange failed: ${res.status} ${await res.text()}`);
-  }
+  if (!res.ok) throw new Error(`Shopify token exchange failed: ${res.status} ${await res.text()}`);
   const data = await res.json();
+  if (!data.access_token) throw new Error("Shopify token response did not contain an access token");
   return data.access_token;
 }
 
-/**
- * Pulls recent customers + their orders from Shopify and upserts them,
- * linking to an existing CRM Customer by email/phone match when possible.
- */
-export async function syncShopifyStore(businessId: string): Promise<{ customers: number; orders: number }> {
-  const store = await prisma.shopifyStore.findUnique({ where: { businessId } });
-  if (!store || !store.accessTokenEncrypted) {
-    throw new Error("Shopify store is not connected for this business");
+async function shopifyGraphql<T>(shopDomain: string, accessToken: string, query: string): Promise<T> {
+  const res = await fetch(`https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": accessToken,
+    },
+    body: JSON.stringify({ query }),
+  });
+  if (!res.ok) throw new Error(`Shopify GraphQL request failed: ${res.status} ${await res.text()}`);
+  const json = await res.json();
+  if (json.errors?.length) {
+    throw new Error(`Shopify GraphQL error: ${json.errors.map((e: { message?: string }) => e.message).join("; ")}`);
   }
+  return json.data as T;
+}
 
-  const { accessToken } = decryptCredentials<{ accessToken: string }>(store.accessTokenEncrypted);
-
-  const res = await fetch(
-    `https://${store.shopDomain}/admin/api/${SHOPIFY_API_VERSION}/customers.json?limit=50`,
-    { headers: { "X-Shopify-Access-Token": accessToken } }
-  );
-  if (!res.ok) {
-    throw new Error(`Shopify customers fetch failed: ${res.status} ${await res.text()}`);
-  }
-  const { customers } = (await res.json()) as {
-    customers: Array<{
-      id: number;
-      email: string | null;
-      phone: string | null;
-      orders_count: number;
-      total_spent: string;
+type ShopifyCustomerNode = {
+  id: string;
+  defaultEmailAddress: { emailAddress: string } | null;
+  defaultPhoneNumber: { phoneNumber: string } | null;
+  numberOfOrders: string | number;
+  amountSpent: { amount: string };
+  orders: {
+    nodes: Array<{
+      id: string;
+      name: string;
+      createdAt: string;
+      displayFinancialStatus: string | null;
+      displayFulfillmentStatus: string | null;
+      currentTotalPriceSet: { shopMoney: { amount: string } };
     }>;
   };
+};
+
+/** Pull recent customers and orders using Shopify's supported GraphQL Admin API. */
+export async function syncShopifyStore(businessId: string): Promise<{ customers: number; orders: number }> {
+  const store = await prisma.shopifyStore.findUnique({ where: { businessId } });
+  if (!store?.accessTokenEncrypted) throw new Error("Shopify store is not connected for this business");
+
+  const { accessToken } = decryptCredentials<{ accessToken: string }>(store.accessTokenEncrypted);
+  const data = await shopifyGraphql<{ customers: { nodes: ShopifyCustomerNode[] } }>(
+    store.shopDomain,
+    accessToken,
+    `#graphql
+      query AshesConnectCustomers {
+        customers(first: 50, sortKey: UPDATED_AT, reverse: true) {
+          nodes {
+            id
+            defaultEmailAddress { emailAddress }
+            defaultPhoneNumber { phoneNumber }
+            numberOfOrders
+            amountSpent { amount }
+            orders(first: 20, sortKey: CREATED_AT, reverse: true) {
+              nodes {
+                id
+                name
+                createdAt
+                displayFinancialStatus
+                displayFulfillmentStatus
+                currentTotalPriceSet { shopMoney { amount } }
+              }
+            }
+          }
+        }
+      }
+    `
+  );
 
   let orderCount = 0;
+  for (const sc of data.customers.nodes) {
+    const email = sc.defaultEmailAddress?.emailAddress ?? null;
+    const phone = sc.defaultPhoneNumber?.phoneNumber ?? null;
 
-  for (const sc of customers) {
     let linkedCustomer = null;
-    if (sc.email) {
-      linkedCustomer = await prisma.customer.findFirst({ where: { businessId, email: sc.email } });
-    }
-    if (!linkedCustomer && sc.phone) {
-      linkedCustomer = await prisma.customer.findFirst({ where: { businessId, phone: sc.phone } });
+    if (email) linkedCustomer = await prisma.customer.findFirst({ where: { businessId, email } });
+    if (!linkedCustomer && phone) {
+      linkedCustomer = await prisma.customer.findFirst({ where: { businessId, phone } });
     }
 
+    const ordersCount = Number(sc.numberOfOrders) || 0;
     const shopifyCustomer = await prisma.shopifyCustomer.upsert({
-      where: { shopifyCustomerId: String(sc.id) },
+      where: {
+        shopifyStoreId_shopifyCustomerId: {
+          shopifyStoreId: store.id,
+          shopifyCustomerId: sc.id,
+        },
+      },
       create: {
         shopifyStoreId: store.id,
-        shopifyCustomerId: String(sc.id),
+        shopifyCustomerId: sc.id,
         customerId: linkedCustomer?.id,
-        email: sc.email,
-        phone: sc.phone,
-        totalSpent: sc.total_spent ?? "0",
-        ordersCount: sc.orders_count ?? 0,
+        email,
+        phone,
+        totalSpent: sc.amountSpent?.amount ?? "0",
+        ordersCount,
       },
       update: {
         customerId: linkedCustomer?.id,
-        email: sc.email,
-        phone: sc.phone,
-        totalSpent: sc.total_spent ?? "0",
-        ordersCount: sc.orders_count ?? 0,
+        email,
+        phone,
+        totalSpent: sc.amountSpent?.amount ?? "0",
+        ordersCount,
       },
     });
 
-    const ordersRes = await fetch(
-      `https://${store.shopDomain}/admin/api/${SHOPIFY_API_VERSION}/customers/${sc.id}/orders.json?status=any&limit=20`,
-      { headers: { "X-Shopify-Access-Token": accessToken } }
-    );
-    if (!ordersRes.ok) continue;
-    const { orders } = (await ordersRes.json()) as {
-      orders: Array<{
-        id: number;
-        name: string;
-        total_price: string;
-        financial_status: string | null;
-        fulfillment_status: string | null;
-        created_at: string;
-      }>;
-    };
-
-    for (const order of orders) {
+    for (const order of sc.orders.nodes) {
       await prisma.shopifyOrder.upsert({
-        where: { shopifyOrderId: String(order.id) },
+        where: {
+          shopifyCustomerId_shopifyOrderId: {
+            shopifyCustomerId: shopifyCustomer.id,
+            shopifyOrderId: order.id,
+          },
+        },
         create: {
           shopifyCustomerId: shopifyCustomer.id,
-          shopifyOrderId: String(order.id),
+          shopifyOrderId: order.id,
           orderNumber: order.name.replace(/^#/, ""),
-          totalPrice: order.total_price,
-          financialStatus: order.financial_status,
-          fulfillmentStatus: order.fulfillment_status,
-          createdAt: new Date(order.created_at),
+          totalPrice: order.currentTotalPriceSet.shopMoney.amount,
+          financialStatus: order.displayFinancialStatus,
+          fulfillmentStatus: order.displayFulfillmentStatus,
+          createdAt: new Date(order.createdAt),
         },
         update: {
-          totalPrice: order.total_price,
-          financialStatus: order.financial_status,
-          fulfillmentStatus: order.fulfillment_status,
+          totalPrice: order.currentTotalPriceSet.shopMoney.amount,
+          financialStatus: order.displayFinancialStatus,
+          fulfillmentStatus: order.displayFulfillmentStatus,
         },
       });
       orderCount++;
@@ -164,6 +198,10 @@ export async function syncShopifyStore(businessId: string): Promise<{ customers:
   }
 
   await prisma.shopifyStore.update({ where: { id: store.id }, data: { lastSyncAt: new Date() } });
+  await prisma.integration.updateMany({
+    where: { businessId, provider: "SHOPIFY" },
+    data: { lastSyncAt: new Date(), lastError: null },
+  });
 
-  return { customers: customers.length, orders: orderCount };
+  return { customers: data.customers.nodes.length, orders: orderCount };
 }
