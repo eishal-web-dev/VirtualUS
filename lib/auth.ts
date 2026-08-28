@@ -11,19 +11,17 @@ const credentialsSchema = z.object({
   password: z.string().min(1),
 });
 
-const ashesTicketSchema = z.object({
-  ticket: z.string().min(20),
+const ashesCodeSchema = z.object({
+  code: z.string().min(20),
 });
 
 const ashesIdentitySchema = z.object({
-  user: z.object({
-    id: z.string().min(1),
-    name: z.string().min(1),
-    email: z.string().email(),
-  }),
+  id: z.string().min(1),
+  name: z.string().min(1),
+  email: z.string().email(),
 });
 
-async function getOrCreateAshesConnectUser(identity: z.infer<typeof ashesIdentitySchema>["user"]) {
+async function getOrCreateAshesConnectUser(identity: z.infer<typeof ashesIdentitySchema>) {
   const email = identity.email.toLowerCase();
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
@@ -69,18 +67,18 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       id: "ashes",
       name: "Ashes",
       credentials: {
-        ticket: { label: "Ashes SSO ticket", type: "text" },
+        code: { label: "Ashes SSO code", type: "text" },
       },
       async authorize(rawCredentials) {
-        const parsed = ashesTicketSchema.safeParse(rawCredentials);
+        const parsed = ashesCodeSchema.safeParse(rawCredentials);
         if (!parsed.success) return null;
 
         let response: Response;
         try {
-          response = await fetch("https://www.ashesstack.cloud/api/connect-sso?action=verify", {
+          response = await fetch("https://www.ashesstack.cloud/api/account-google?sso=consume", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ticket: parsed.data.ticket }),
+            body: JSON.stringify({ code: parsed.data.code }),
             cache: "no-store",
           });
         } catch {
@@ -91,7 +89,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const identity = ashesIdentitySchema.safeParse(await response.json());
         if (!identity.success) return null;
 
-        const user = await getOrCreateAshesConnectUser(identity.data.user);
+        const user = await getOrCreateAshesConnectUser(identity.data);
         return { id: user.id, name: user.name, email: user.email };
       },
     }),
