@@ -1,6 +1,8 @@
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { decryptCredentials } from "@/lib/crypto";
+import { createOAuthState } from "@/lib/oauth-state";
+import { META_GRAPH_BASE_URL, META_GRAPH_API_VERSION } from "@/lib/meta";
 import { BaseMessagingProvider } from "./base";
 import type {
   MessagingProvider,
@@ -9,22 +11,7 @@ import type {
   InboundMessage,
 } from "./provider";
 
-const GRAPH_API_VERSION = "v21.0";
-
-/**
- * WhatsApp Business via Meta's WhatsApp Cloud API.
- *
- * Required environment variables (see .env.example):
- *   META_APP_ID, META_APP_SECRET, META_VERIFY_TOKEN
- *   WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_BUSINESS_ACCOUNT_ID
- *
- * If these are not set, `isConfigured()` returns false and the app runs in
- * mock/development mode: the connect flow marks the integration row as
- * `MOCK`, and `sendMessage` simulates a successful send + logs to the
- * database without calling Meta's API. This lets every other part of the
- * product (inbox, timeline, CRM) be built and tested before Meta app
- * review / production credentials are available.
- */
+/** WhatsApp Business through Meta's Cloud API. */
 class WhatsAppProvider extends BaseMessagingProvider implements MessagingProvider {
   readonly channel = "WHATSAPP" as const;
   protected dbProvider = "WHATSAPP" as const;
@@ -39,21 +26,18 @@ class WhatsAppProvider extends BaseMessagingProvider implements MessagingProvide
   }
 
   async getConnectUrl(businessId: string): Promise<string | null> {
-    if (!this.isConfigured()) return null; // caller falls back to mock-connect
-
-    const appId = process.env.META_APP_ID;
-    const redirectUri = `${process.env.APP_BASE_URL ?? process.env.NEXTAUTH_URL}/api/integrations/whatsapp/callback`;
-    const state = businessId;
-
+    if (!this.isConfigured()) return null;
+    const baseUrl = process.env.APP_BASE_URL ?? process.env.NEXTAUTH_URL;
+    if (!baseUrl) throw new Error("APP_BASE_URL is required for Meta OAuth");
+    const redirectUri = `${baseUrl}/api/integrations/whatsapp/callback`;
     const params = new URLSearchParams({
-      client_id: appId!,
+      client_id: process.env.META_APP_ID!,
       redirect_uri: redirectUri,
-      state,
+      state: createOAuthState(businessId, "WHATSAPP"),
       response_type: "code",
       scope: "whatsapp_business_management,whatsapp_business_messaging",
     });
-
-    return `https://www.facebook.com/${GRAPH_API_VERSION}/dialog/oauth?${params.toString()}`;
+    return `https://www.facebook.com/${META_GRAPH_API_VERSION}/dialog/oauth?${params.toString()}`;
   }
 
   async sendMessage(businessId: string, message: OutboundMessage): Promise<SendResult> {
@@ -64,25 +48,24 @@ class WhatsAppProvider extends BaseMessagingProvider implements MessagingProvide
     if (!integration || integration.status === "NOT_CONNECTED") {
       throw new Error("WhatsApp is not connected for this business");
     }
-
     if (integration.status === "MOCK" || !this.isConfigured()) {
-      // Development mode: simulate a successful send.
       return { providerMessageId: `mock_wa_${crypto.randomUUID()}`, status: "SENT" };
     }
-
-    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-    const accessToken = integration.encryptedCredentials
-      ? decryptCredentials<{ accessToken: string }>(integration.encryptedCredentials).accessToken
-      : process.env.META_APP_SECRET; // fallback only relevant in single-tenant/dev setups
-
-    if (!accessToken) {
+    if (!integration.encryptedCredentials) {
       throw new Error("No WhatsApp access token on file for this business — reconnect the account");
     }
 
-    const res = await fetch(`https://graph.facebook.com/${GRAPH_API_VERSION}/${phoneNumberId}/messages`, {
+    const credentials = decryptCredentials<{ accessToken: string }>(integration.encryptedCredentials);
+    const config = (integration.config ?? {}) as { phoneNumberId?: string; businessAccountId?: string };
+    const phoneNumberId = config.phoneNumberId ?? process.env.WHATSAPP_PHONE_NUMBER_ID;
+    if (!phoneNumberId) {
+      throw new Error("WhatsApp phone number ID is missing — reconnect the account");
+    }
+
+    const res = await fetch(`${META_GRAPH_BASE_URL}/${phoneNumberId}/messages`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${credentials.accessToken}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -103,7 +86,6 @@ class WhatsAppProvider extends BaseMessagingProvider implements MessagingProvide
   }
 
   parseWebhookPayload(payload: unknown): InboundMessage[] {
-    // Meta's webhook shape: entry[].changes[].value.messages[]
     const results: InboundMessage[] = [];
     const body = payload as {
       entry?: Array<{
@@ -145,12 +127,11 @@ class WhatsAppProvider extends BaseMessagingProvider implements MessagingProvide
   validateWebhookSignature(input: { payload: string; signatureHeader: string | null }): boolean {
     const appSecret = process.env.META_APP_SECRET;
     if (!appSecret || !input.signatureHeader) return false;
-
-    const expected =
-      "sha256=" + crypto.createHmac("sha256", appSecret).update(input.payload).digest("hex");
-
+    const expected = "sha256=" + crypto.createHmac("sha256", appSecret).update(input.payload).digest("hex");
     try {
-      return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(input.signatureHeader));
+      const a = Buffer.from(expected);
+      const b = Buffer.from(input.signatureHeader);
+      return a.length === b.length && crypto.timingSafeEqual(a, b);
     } catch {
       return false;
     }
