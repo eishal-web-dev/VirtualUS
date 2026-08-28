@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { facebookProvider } from "@/lib/messaging/facebook";
 import { resolveOrCreateCustomer, recordMessage } from "@/lib/inbox";
@@ -29,7 +30,7 @@ export async function POST(req: Request) {
   }
 
   const webhookEvent = await prisma.webhookEvent.create({
-    data: { provider: "facebook", payload, status: "RECEIVED" },
+    data: { provider: "facebook", payload: payload as Prisma.InputJsonValue, status: "RECEIVED" },
   });
 
   if (!validSignature && process.env.NODE_ENV === "production") {
