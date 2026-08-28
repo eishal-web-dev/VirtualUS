@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
+import { decryptCredentials } from "@/lib/crypto";
 import { BaseMessagingProvider } from "./base";
 import type {
   MessagingProvider,
@@ -71,8 +72,12 @@ class WhatsAppProvider extends BaseMessagingProvider implements MessagingProvide
 
     const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
     const accessToken = integration.encryptedCredentials
-      ? undefined // real token would be decrypted here via lib/crypto
-      : undefined;
+      ? decryptCredentials<{ accessToken: string }>(integration.encryptedCredentials).accessToken
+      : process.env.META_APP_SECRET; // fallback only relevant in single-tenant/dev setups
+
+    if (!accessToken) {
+      throw new Error("No WhatsApp access token on file for this business — reconnect the account");
+    }
 
     const res = await fetch(`https://graph.facebook.com/${GRAPH_API_VERSION}/${phoneNumberId}/messages`, {
       method: "POST",

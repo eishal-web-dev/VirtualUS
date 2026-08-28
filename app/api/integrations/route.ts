@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireTenant } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
 import { getMessagingProvider } from "@/lib/messaging";
+import { isConfigured as isShopifyConfigured } from "@/lib/shopify";
 import type { IntegrationProvider } from "@prisma/client";
 
 const CHANNEL_PROVIDERS: { provider: IntegrationProvider; label: string }[] = [
@@ -25,10 +26,12 @@ export async function GET() {
     const row = byProvider.get(provider);
     let isConfigured = false;
     try {
-      if (provider !== "TWILIO" && provider !== "SHOPIFY") {
-        isConfigured = getMessagingProvider(provider).isConfigured();
-      } else if (provider === "TWILIO") {
+      if (provider === "TWILIO") {
         isConfigured = Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN);
+      } else if (provider === "SHOPIFY") {
+        isConfigured = isShopifyConfigured();
+      } else {
+        isConfigured = getMessagingProvider(provider).isConfigured();
       }
     } catch {
       isConfigured = false;

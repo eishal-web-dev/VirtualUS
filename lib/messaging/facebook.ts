@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
+import { decryptCredentials } from "@/lib/crypto";
 import { BaseMessagingProvider } from "./base";
 import type { MessagingProvider, OutboundMessage, SendResult, InboundMessage } from "./provider";
 
@@ -39,9 +40,28 @@ class FacebookProvider extends BaseMessagingProvider implements MessagingProvide
     if (integration.status === "MOCK" || !this.isConfigured()) {
       return { providerMessageId: `mock_fb_${crypto.randomUUID()}`, status: "SENT" };
     }
-    // Real send: POST https://graph.facebook.com/v21.0/me/messages with the
-    // page access token decrypted from integration.encryptedCredentials.
-    throw new Error("Facebook live send not yet wired — connect a Page to enable this path");
+
+    if (!integration.encryptedCredentials) {
+      throw new Error("No Facebook Page access token on file — reconnect the account");
+    }
+    const { accessToken } = decryptCredentials<{ accessToken: string }>(integration.encryptedCredentials);
+
+    const res = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${accessToken}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recipient: { id: _message.to },
+        message: { text: _message.text ?? "" },
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Facebook send failed: ${res.status} ${body}`);
+    }
+
+    const data = await res.json();
+    return { providerMessageId: data.message_id ?? crypto.randomUUID(), status: "SENT" };
   }
 
   parseWebhookPayload(payload: unknown): InboundMessage[] {

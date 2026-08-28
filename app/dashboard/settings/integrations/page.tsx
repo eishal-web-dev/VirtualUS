@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Card, Badge } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { channelMeta } from "@/lib/channels";
@@ -107,7 +108,13 @@ export default function IntegrationsSettingsPage() {
 
               {canManage && (
                 <div className="mt-4">
-                  {row.status === "NOT_CONNECTED" ? (
+                  {row.provider === "SHOPIFY" ? (
+                    <Link href="/dashboard/shopify">
+                      <Button size="sm" variant="secondary">
+                        Manage in Shopify page
+                      </Button>
+                    </Link>
+                  ) : row.status === "NOT_CONNECTED" ? (
                     <Button size="sm" onClick={() => connect(row.provider)} disabled={busy === row.provider}>
                       Connect
                     </Button>

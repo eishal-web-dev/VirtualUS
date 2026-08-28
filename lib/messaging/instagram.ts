@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
+import { decryptCredentials } from "@/lib/crypto";
 import { BaseMessagingProvider } from "./base";
 import type { MessagingProvider, OutboundMessage, SendResult, InboundMessage } from "./provider";
 
@@ -39,7 +40,30 @@ class InstagramProvider extends BaseMessagingProvider implements MessagingProvid
     if (integration.status === "MOCK" || !this.isConfigured()) {
       return { providerMessageId: `mock_ig_${crypto.randomUUID()}`, status: "SENT" };
     }
-    throw new Error("Instagram live send not yet wired — connect an account to enable this path");
+
+    if (!integration.encryptedCredentials) {
+      throw new Error("No Instagram access token on file — reconnect the account");
+    }
+    const { accessToken } = decryptCredentials<{ accessToken: string }>(integration.encryptedCredentials);
+
+    // Instagram messaging uses the same Send API shape as Messenger, scoped
+    // to the IG professional account tied to this Page token.
+    const res = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${accessToken}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recipient: { id: _message.to },
+        message: { text: _message.text ?? "" },
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Instagram send failed: ${res.status} ${body}`);
+    }
+
+    const data = await res.json();
+    return { providerMessageId: data.message_id ?? crypto.randomUUID(), status: "SENT" };
   }
 
   parseWebhookPayload(payload: unknown): InboundMessage[] {
