@@ -10,10 +10,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ============================================================
-// Phase 1 enums (unchanged)
-// ============================================================
-
 enum PhoneNumberStatus {
   ACTIVE
   RELEASED
@@ -49,10 +45,6 @@ enum SubscriptionStatus {
   PAST_DUE
   TRIALING
 }
-
-// ============================================================
-// Phase 2 enums (Ashes Connect)
-// ============================================================
 
 enum BusinessRole {
   OWNER
@@ -131,10 +123,6 @@ enum NotificationType {
   SYSTEM
 }
 
-// ============================================================
-// Phase 1 models
-// ============================================================
-
 model User {
   id              String   @id @default(cuid())
   name            String?
@@ -205,10 +193,6 @@ model Call {
   @@map("calls")
 }
 
-// ============================================================
-// Multi-tenancy
-// ============================================================
-
 model Business {
   id        String   @id @default(cuid())
   name      String
@@ -255,10 +239,6 @@ model Subscription {
 
   @@map("subscriptions")
 }
-
-// ============================================================
-// Unified CRM
-// ============================================================
 
 model Customer {
   id              String   @id @default(cuid())
@@ -340,21 +320,17 @@ model Message {
   body              String?
   attachmentUrl     String?
   providerMessageId String?
+  dedupeKey         String?          @unique
   status            MessageStatus    @default(QUEUED)
   sentAt            DateTime         @default(now())
   deliveredAt       DateTime?
   readAt            DateTime?
   createdAt         DateTime         @default(now())
 
-  @@unique([channel, providerMessageId])
   @@index([conversationId])
   @@index([customerId])
   @@map("messages")
 }
-
-// ============================================================
-// Integrations
-// ============================================================
 
 model Integration {
   id                   String              @id @default(cuid())
@@ -364,6 +340,7 @@ model Integration {
   status               IntegrationStatus   @default(NOT_CONNECTED)
   externalAccountId    String?
   externalAccountName  String?
+  routingKey           String?             @unique
   encryptedCredentials String?
   config               Json?
   connectedAt          DateTime?
@@ -373,15 +350,14 @@ model Integration {
   updatedAt            DateTime            @updatedAt
 
   @@unique([businessId, provider])
-  @@unique([provider, externalAccountId])
   @@map("integrations")
 }
 
 model ShopifyStore {
-  id                   String   @id @default(cuid())
-  businessId           String   @unique
-  business             Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  shopDomain           String   @unique
+  id                   String    @id @default(cuid())
+  businessId           String    @unique
+  business             Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  shopDomain           String    @unique
   accessTokenEncrypted String?
   connectedAt          DateTime?
   lastSyncAt           DateTime?
