@@ -34,13 +34,20 @@ function normalizeDatabaseUrl(raw?: string) {
       if (!supported.has(key)) url.searchParams.delete(key);
     }
 
-    // Supabase transaction pooling (6543) is the correct mode for Vercel's
-    // short-lived serverless requests. Prisma must disable prepared statements
-    // when it talks through that pooler.
-    if (url.port === "6543") {
-      url.searchParams.set("pgbouncer", "true");
+    // Supabase's shared session pooler is IPv4-compatible and supports Prisma's
+    // prepared statements. It is more reliable for this Vercel deployment than
+    // the transaction endpoint that was returning P1001 connection failures.
+    if (url.hostname.endsWith(".pooler.supabase.com") && url.port === "6543") {
+      url.port = "5432";
+      url.searchParams.delete("pgbouncer");
+    }
+
+    if (url.hostname.endsWith(".pooler.supabase.com")) {
       if (!url.searchParams.has("connection_limit")) {
         url.searchParams.set("connection_limit", "1");
+      }
+      if (!url.searchParams.has("connect_timeout")) {
+        url.searchParams.set("connect_timeout", "15");
       }
     }
 
