@@ -5,6 +5,9 @@ import type { NextAuthConfig } from "next-auth";
  * calls here. Prisma isn't Edge-runtime compatible, so `middleware.ts`
  * uses this config directly, while the full config (lib/auth.ts) adds the
  * Credentials provider for use in Node.js route handlers.
+ *
+ * Keep this file environment-driven so Vercel picks up production secrets
+ * cleanly on each deployment.
  */
 export const authConfig: NextAuthConfig = {
   // Prefer a dedicated Auth.js secret. When Connect is installed as an Ashes
