@@ -13,6 +13,20 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ashes_connect
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d ashes_connect"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/ashes_connect
       NEXTAUTH_SECRET: ci-only-secret-do-not-use-in-production-1234567890
@@ -34,6 +48,12 @@ jobs:
 
       - name: Generate Prisma client
         run: npx prisma generate
+
+      - name: Apply database migrations
+        run: npx prisma migrate deploy
+
+      - name: Database smoke test
+        run: npx tsx scripts/ci-smoke.ts
 
       - name: Lint
         run: npm run lint
