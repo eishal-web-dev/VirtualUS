@@ -41,6 +41,7 @@ export async function GET(req: Request) {
     if (!page?.instagramBusinessAccountId) {
       throw new Error("No Instagram professional account linked to an authorized Facebook Page was returned by Meta");
     }
+    const routingKey = `INSTAGRAM:${page.instagramBusinessAccountId}`;
 
     await prisma.integration.upsert({
       where: { businessId_provider: { businessId, provider: "INSTAGRAM" } },
@@ -50,6 +51,7 @@ export async function GET(req: Request) {
         status: "CONNECTED",
         externalAccountId: page.instagramBusinessAccountId,
         externalAccountName: page.name,
+        routingKey,
         encryptedCredentials: encryptCredentials({ accessToken: page.accessToken }),
         config: { pageId: page.id, instagramBusinessAccountId: page.instagramBusinessAccountId },
         connectedAt: new Date(),
@@ -60,6 +62,7 @@ export async function GET(req: Request) {
         status: "CONNECTED",
         externalAccountId: page.instagramBusinessAccountId,
         externalAccountName: page.name,
+        routingKey,
         encryptedCredentials: encryptCredentials({ accessToken: page.accessToken }),
         config: { pageId: page.id, instagramBusinessAccountId: page.instagramBusinessAccountId },
         connectedAt: new Date(),
