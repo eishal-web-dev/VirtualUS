@@ -8,9 +8,7 @@ import type {
 
 function requiredEnv(name: string): string {
   const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required env var: ${name}`);
-  }
+  if (!value) throw new Error(`Missing required env var: ${name}`);
   return value;
 }
 
@@ -18,19 +16,15 @@ class TwilioProvider implements TelecomProvider {
   readonly name = "twilio" as const;
 
   private get client() {
-    const accountSid = requiredEnv("TWILIO_ACCOUNT_SID");
-    const authToken = requiredEnv("TWILIO_AUTH_TOKEN");
-    return twilio(accountSid, authToken);
+    return twilio(requiredEnv("TWILIO_ACCOUNT_SID"), requiredEnv("TWILIO_AUTH_TOKEN"));
   }
 
   async searchAvailableNumbers(areaCode: string, limit = 10): Promise<AvailableNumber[]> {
-    if (!/^\d{3}$/.test(areaCode)) {
-      throw new Error("areaCode must be a 3-digit US area code");
-    }
+    if (!/^\d{3}$/.test(areaCode)) throw new Error("areaCode must be a 3-digit US area code");
 
     const results = await this.client
       .availablePhoneNumbers("US")
-      .local.list({ areaCode: Number(areaCode), limit, voiceEnabled: true });
+      .local.list({ areaCode: Number(areaCode), limit, voiceEnabled: true, smsEnabled: true });
 
     return results.map((r) => ({
       phoneNumber: r.phoneNumber,
@@ -44,20 +38,16 @@ class TwilioProvider implements TelecomProvider {
   async purchaseNumber(
     phoneNumber: string,
     voiceWebhookUrl: string,
-    statusCallbackUrl: string
+    smsWebhookUrl: string
   ): Promise<ProvisionedNumber> {
     const purchased = await this.client.incomingPhoneNumbers.create({
       phoneNumber,
       voiceUrl: voiceWebhookUrl,
       voiceMethod: "POST",
-      statusCallback: statusCallbackUrl,
-      statusCallbackMethod: "POST",
+      smsUrl: smsWebhookUrl,
+      smsMethod: "POST",
     });
-
-    return {
-      phoneNumber: purchased.phoneNumber,
-      providerSid: purchased.sid,
-    };
+    return { phoneNumber: purchased.phoneNumber, providerSid: purchased.sid };
   }
 
   async releaseNumber(providerSid: string): Promise<void> {
@@ -67,25 +57,19 @@ class TwilioProvider implements TelecomProvider {
   async createVoiceAccessToken(identity: string): Promise<VoiceAccessToken> {
     const AccessToken = twilio.jwt.AccessToken;
     const VoiceGrant = AccessToken.VoiceGrant;
-
-    const accountSid = requiredEnv("TWILIO_ACCOUNT_SID");
-    const apiKey = requiredEnv("TWILIO_API_KEY");
-    const apiSecret = requiredEnv("TWILIO_API_SECRET");
-    const twimlAppSid = requiredEnv("TWILIO_TWIML_APP_SID");
-
     const ttlSeconds = 3600;
-
-    const token = new AccessToken(accountSid, apiKey, apiSecret, {
-      identity,
-      ttl: ttlSeconds,
-    });
-
-    const voiceGrant = new VoiceGrant({
-      outgoingApplicationSid: twimlAppSid,
-      incomingAllow: true,
-    });
-    token.addGrant(voiceGrant);
-
+    const token = new AccessToken(
+      requiredEnv("TWILIO_ACCOUNT_SID"),
+      requiredEnv("TWILIO_API_KEY"),
+      requiredEnv("TWILIO_API_SECRET"),
+      { identity, ttl: ttlSeconds }
+    );
+    token.addGrant(
+      new VoiceGrant({
+        outgoingApplicationSid: requiredEnv("TWILIO_TWIML_APP_SID"),
+        incomingAllow: true,
+      })
+    );
     return { token: token.toJwt(), identity, ttlSeconds };
   }
 
