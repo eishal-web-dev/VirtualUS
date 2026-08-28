@@ -1,0 +1,48 @@
+{
+  "name": "virtualus",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "db:seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@auth/prisma-adapter": "2.11.3",
+    "@prisma/client": "6.19.3",
+    "@twilio/voice-sdk": "^2.18.3",
+    "@types/bcryptjs": "2.4.6",
+    "@types/node": "26.4.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "autoprefixer": "10.5.4",
+    "bcryptjs": "3.0.3",
+    "clsx": "2.1.1",
+    "eslint": "9.39.5",
+    "eslint-config-next": "15.5.24",
+    "lucide-react": "^1.35.0",
+    "next": "15.5.24",
+    "next-auth": "5.0.0-beta.32",
+    "postcss": "8.5.26",
+    "prisma": "6.19.3",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "recharts": "^3.10.1",
+    "tailwindcss": "3.4.19",
+    "tsx": "4.23.12",
+    "twilio": "6.1.0",
+    "typescript": "5.9.3",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.6"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  }
+}
