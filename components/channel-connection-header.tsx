@@ -28,7 +28,7 @@ const STATUS_LABEL: Record<IntegrationRow["status"], string> = {
   NOT_CONNECTED: "Not connected",
   CONNECTED: "Connected",
   ERROR: "Error",
-  PENDING_APPROVAL: "Pending approval",
+  PENDING_APPROVAL: "Pending setup",
   MOCK: "Mock / development mode",
 };
 
@@ -41,6 +41,7 @@ export function ChannelConnectionHeader({
 }) {
   const [integration, setIntegration] = useState<IntegrationRow | null>(null);
   const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function load() {
     const res = await fetch("/api/integrations");
@@ -56,14 +57,22 @@ export function ChannelConnectionHeader({
 
   async function connect() {
     setBusy(true);
+    setActionError(null);
     try {
-      const endpoint = provider === "WHATSAPP" ? "/api/integrations/whatsapp/connect" : `/api/integrations/${provider.toLowerCase()}/connect`;
+      const endpoint =
+        provider === "WHATSAPP"
+          ? "/api/integrations/whatsapp/connect"
+          : `/api/integrations/${provider.toLowerCase()}/connect`;
       const res = await fetch(endpoint, { method: "POST" });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `Could not connect ${provider}`);
       if (data.redirectUrl) {
         window.location.href = data.redirectUrl;
         return;
       }
+      await load();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Connection failed");
       await load();
     } finally {
       setBusy(false);
@@ -72,9 +81,14 @@ export function ChannelConnectionHeader({
 
   async function disconnect() {
     setBusy(true);
+    setActionError(null);
     try {
-      await fetch(`/api/integrations/${provider.toLowerCase()}/disconnect`, { method: "POST" });
+      const res = await fetch(`/api/integrations/${provider.toLowerCase()}/disconnect`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Could not disconnect ${provider}`);
       await load();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Disconnect failed");
     } finally {
       setBusy(false);
     }
@@ -82,6 +96,8 @@ export function ChannelConnectionHeader({
 
   const meta = channelMeta(provider);
   const Icon = meta.icon;
+  const canUpgradeMock = integration?.status === "MOCK" && integration.isConfigured;
+  const canRetry = integration?.status === "PENDING_APPROVAL" || integration?.status === "ERROR";
 
   return (
     <Card className="p-5">
@@ -103,9 +119,18 @@ export function ChannelConnectionHeader({
 
         <div className="flex items-center gap-3">
           {integration && <Badge tone={STATUS_TONE[integration.status]}>{STATUS_LABEL[integration.status]}</Badge>}
+
           {!integration || integration.status === "NOT_CONNECTED" ? (
             <Button size="sm" onClick={connect} disabled={busy}>
-              Connect
+              {busy ? "Connecting…" : "Connect"}
+            </Button>
+          ) : canUpgradeMock ? (
+            <Button size="sm" onClick={connect} disabled={busy}>
+              {busy ? "Checking…" : "Go live"}
+            </Button>
+          ) : canRetry ? (
+            <Button size="sm" onClick={connect} disabled={busy}>
+              {busy ? "Checking…" : integration.status === "ERROR" ? "Retry" : "Check again"}
             </Button>
           ) : (
             <Button size="sm" variant="secondary" onClick={disconnect} disabled={busy}>
@@ -124,11 +149,19 @@ export function ChannelConnectionHeader({
 
       {integration?.status === "MOCK" && !requiresApproval && (
         <p className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
-          Running in development mode with a simulated account — messages sent here are logged to
-          the database but not delivered to a real {meta.label} account. Add the required
-          environment variables and reconnect to go live.
+          {integration.isConfigured && provider === "WHATSAPP"
+            ? "Telnyx is connected to Ashes Connect. Click Go live to reuse your Telnyx number for WhatsApp Business. If Meta onboarding is not complete yet, you will be sent to Telnyx to finish it."
+            : `Running in development mode with a simulated account — messages sent here are logged to the database but not delivered to a real ${meta.label} account.`}
         </p>
       )}
+
+      {integration?.lastError && (integration.status === "PENDING_APPROVAL" || integration.status === "ERROR") && (
+        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          {integration.lastError}
+        </p>
+      )}
+
+      {actionError && <p className="mt-3 text-xs text-red-600">{actionError}</p>}
     </Card>
   );
 }
