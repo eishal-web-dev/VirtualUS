@@ -1,18 +1,19 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { encryptCredentials } from "@/lib/crypto";
-import { verifyShopifyHmac, exchangeShopifyCode, syncShopifyStore } from "@/lib/shopify";
+import { verifyOAuthState } from "@/lib/oauth-state";
+import { verifyShopifyHmac, exchangeShopifyCode, syncShopifyStore, normalizeShopDomain } from "@/lib/shopify";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const { searchParams, origin } = url;
   const code = searchParams.get("code");
-  const shop = searchParams.get("shop");
-  const state = searchParams.get("state"); // businessId
+  const shopParam = searchParams.get("shop");
+  const state = searchParams.get("state");
 
   const shopifyPageUrl = new URL("/dashboard/shopify", origin);
 
-  if (!code || !shop || !state) {
+  if (!code || !shopParam || !state) {
     shopifyPageUrl.searchParams.set("error", "shopify_connect_failed");
     return NextResponse.redirect(shopifyPageUrl);
   }
@@ -22,7 +23,19 @@ export async function GET(req: Request) {
     return NextResponse.redirect(shopifyPageUrl);
   }
 
-  const business = await prisma.business.findUnique({ where: { id: state } });
+  const businessId = verifyOAuthState(state, "SHOPIFY");
+  if (!businessId) {
+    shopifyPageUrl.searchParams.set("error", "shopify_invalid_state");
+    return NextResponse.redirect(shopifyPageUrl);
+  }
+
+  const shop = normalizeShopDomain(shopParam);
+  if (!shop) {
+    shopifyPageUrl.searchParams.set("error", "shopify_invalid_shop");
+    return NextResponse.redirect(shopifyPageUrl);
+  }
+
+  const business = await prisma.business.findUnique({ where: { id: businessId } });
   if (!business) {
     shopifyPageUrl.searchParams.set("error", "unknown_business");
     return NextResponse.redirect(shopifyPageUrl);
@@ -32,9 +45,9 @@ export async function GET(req: Request) {
     const accessToken = await exchangeShopifyCode(shop, code);
 
     await prisma.shopifyStore.upsert({
-      where: { businessId: state },
+      where: { businessId },
       create: {
-        businessId: state,
+        businessId,
         shopDomain: shop,
         accessTokenEncrypted: encryptCredentials({ accessToken }),
         connectedAt: new Date(),
@@ -47,9 +60,9 @@ export async function GET(req: Request) {
     });
 
     await prisma.integration.upsert({
-      where: { businessId_provider: { businessId: state, provider: "SHOPIFY" } },
+      where: { businessId_provider: { businessId, provider: "SHOPIFY" } },
       create: {
-        businessId: state,
+        businessId,
         provider: "SHOPIFY",
         status: "CONNECTED",
         externalAccountId: shop,
@@ -62,14 +75,12 @@ export async function GET(req: Request) {
         externalAccountId: shop,
         externalAccountName: shop,
         connectedAt: new Date(),
+        lastError: null,
       },
     });
 
-    // Best-effort initial sync; failures here shouldn't block the connect
-    // flow since the account is already connected and a retry is one
-    // click away on the Shopify page.
     try {
-      await syncShopifyStore(state);
+      await syncShopifyStore(businessId);
     } catch (syncErr) {
       console.error("[shopify/callback] initial sync failed", syncErr);
     }
