@@ -39,6 +39,7 @@ export async function GET(req: Request) {
     const pages = await fetchManagedMetaPages(longLived.accessToken);
     const page = pages[0];
     if (!page) throw new Error("No Facebook Page with messaging access was returned by Meta");
+    const routingKey = `FACEBOOK:${page.id}`;
 
     await prisma.integration.upsert({
       where: { businessId_provider: { businessId, provider: "FACEBOOK" } },
@@ -48,6 +49,7 @@ export async function GET(req: Request) {
         status: "CONNECTED",
         externalAccountId: page.id,
         externalAccountName: page.name,
+        routingKey,
         encryptedCredentials: encryptCredentials({ accessToken: page.accessToken }),
         config: { pageId: page.id },
         connectedAt: new Date(),
@@ -58,6 +60,7 @@ export async function GET(req: Request) {
         status: "CONNECTED",
         externalAccountId: page.id,
         externalAccountName: page.name,
+        routingKey,
         encryptedCredentials: encryptCredentials({ accessToken: page.accessToken }),
         config: { pageId: page.id },
         connectedAt: new Date(),
