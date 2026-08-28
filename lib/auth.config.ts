@@ -7,7 +7,13 @@ import type { NextAuthConfig } from "next-auth";
  * Credentials provider for use in Node.js route handlers.
  */
 export const authConfig: NextAuthConfig = {
-  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+  // Prefer a dedicated Auth.js secret. When Connect is installed as an Ashes
+  // product, DATABASE_URL is already a high-entropy server-only credential, so
+  // it is a safe fallback and avoids requiring a second setup secret.
+  secret:
+    process.env.AUTH_SECRET ??
+    process.env.NEXTAUTH_SECRET ??
+    process.env.DATABASE_URL,
   trustHost: true,
   session: { strategy: "jwt" },
   pages: {
