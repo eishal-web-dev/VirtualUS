@@ -57,8 +57,13 @@ function normalizeDatabaseUrl(raw?: string) {
   }
 }
 
+// Prefer the Vercel/Supabase managed variables when the native integration is
+// connected. They are synchronized by the integration and avoid stale manual
+// DATABASE_URL values. Fall back to DATABASE_URL for local/manual setups.
 const databaseUrl = normalizeDatabaseUrl(
-  process.env.DATABASE_URL || process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL
+  process.env.POSTGRES_PRISMA_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.DATABASE_URL
 );
 
 // Avoid exhausting DB connections with hot-reload in dev by caching the client.
