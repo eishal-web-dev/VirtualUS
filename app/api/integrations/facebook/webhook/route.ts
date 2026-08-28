@@ -15,22 +15,19 @@ export async function GET(req: Request) {
   return NextResponse.json({ error: "Verification failed" }, { status: 403 });
 }
 
-/**
- * NOTE: same single-app-credentials caveat as the WhatsApp webhook — this
- * MVP routes inbound Messenger events to the first business with a
- * connected Facebook integration. Multi-business production use needs
- * per-Page routing keyed off the Page ID in the payload.
- */
+/** Routes each Messenger webhook entry by its Page ID to the owning tenant. */
 export async function POST(req: Request) {
   const rawBody = await req.text();
   const signature = req.headers.get("x-hub-signature-256");
+  const validSignature = facebookProvider.validateWebhookSignature({ payload: rawBody, signatureHeader: signature });
 
-  const validSignature = facebookProvider.validateWebhookSignature({
-    payload: rawBody,
-    signatureHeader: signature,
-  });
+  let payload: { entry?: Array<{ id?: string; messaging?: unknown[] }> };
+  try {
+    payload = JSON.parse(rawBody);
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
 
-  const payload = JSON.parse(rawBody);
   const webhookEvent = await prisma.webhookEvent.create({
     data: { provider: "facebook", payload, status: "RECEIVED" },
   });
@@ -44,20 +41,23 @@ export async function POST(req: Request) {
   }
 
   try {
-    const integration = await prisma.integration.findFirst({
-      where: { provider: "FACEBOOK", status: { in: ["CONNECTED", "MOCK"] } },
-      orderBy: { connectedAt: "asc" },
-    });
+    const businessIds = new Set<string>();
 
-    if (integration) {
-      const messages = facebookProvider.parseWebhookPayload(payload);
+    for (const entry of payload.entry ?? []) {
+      if (!entry.id) continue;
+      const integration = await prisma.integration.findFirst({
+        where: { provider: "FACEBOOK", status: "CONNECTED", externalAccountId: entry.id },
+      });
+      if (!integration) continue;
+      businessIds.add(integration.businessId);
+
+      const messages = facebookProvider.parseWebhookPayload({ entry: [entry] });
       for (const msg of messages) {
         const customer = await resolveOrCreateCustomer({
           businessId: integration.businessId,
           platform: "FACEBOOK",
           externalId: msg.from,
         });
-
         await recordMessage({
           businessId: integration.businessId,
           customerId: customer.id,
@@ -72,7 +72,11 @@ export async function POST(req: Request) {
 
     await prisma.webhookEvent.update({
       where: { id: webhookEvent.id },
-      data: { status: "PROCESSED", processedAt: new Date() },
+      data: {
+        businessId: businessIds.size === 1 ? [...businessIds][0] : null,
+        status: "PROCESSED",
+        processedAt: new Date(),
+      },
     });
   } catch (err) {
     await prisma.webhookEvent.update({
