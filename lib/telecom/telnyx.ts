@@ -8,7 +8,25 @@ import type {
 const API_BASE = "https://api.telnyx.com/v2";
 
 function requiredEnv(name: string): string {
-  const value = process.env[name];
+  const raw = process.env[name];
+  if (!raw) throw new Error(`Missing required env var: ${name}`);
+
+  let value = raw.trim();
+  value = value.replace(new RegExp(`^${name}\\s*=\\s*`, "i"), "").trim();
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'")) ||
+    (value.startsWith("`") && value.endsWith("`"))
+  ) {
+    value = value.slice(1, -1).trim();
+  }
+
+  // People often paste the entire Authorization value into Vercel. Telnyx
+  // expects us to add the Bearer prefix ourselves, so normalize it here.
+  if (name === "TELNYX_API_KEY") {
+    value = value.replace(/^Bearer\s+/i, "").trim();
+  }
+
   if (!value) throw new Error(`Missing required env var: ${name}`);
   return value;
 }
@@ -116,8 +134,6 @@ class TelnyxProvider implements TelecomProvider {
     const orderId = order.data?.id;
     if (!orderId) throw new Error("Telnyx did not return a number order id");
 
-    // US local numbers generally activate quickly. Give the order a short window
-    // to settle before resolving the permanent phone-number resource id.
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const current = await telnyxRequest<NumberOrderResponse>(`/number_orders/${orderId}`);
       const status = current.data?.phone_numbers?.find((n) => n.phone_number === phoneNumber)?.status;
@@ -137,8 +153,6 @@ class TelnyxProvider implements TelecomProvider {
 
     return {
       phoneNumber,
-      // Delete/release needs the permanent phone-number resource id. If Telnyx is
-      // still finishing activation, keep a reversible fallback containing the E.164 number.
       providerSid: resource?.id ?? `telnyx-number:${phoneNumber}`,
     };
   }
@@ -165,9 +179,6 @@ class TelnyxProvider implements TelecomProvider {
   }
 
   validateWebhookSignature(): boolean {
-    // Telnyx uses Ed25519 plus a timestamp header. The current provider interface
-    // was designed around Twilio's single signature header, so Telnyx webhooks are
-    // wired in the next voice/SMS step with their native validation shape.
     return false;
   }
 }
