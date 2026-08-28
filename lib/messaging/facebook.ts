@@ -1,14 +1,12 @@
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { decryptCredentials } from "@/lib/crypto";
+import { createOAuthState } from "@/lib/oauth-state";
+import { META_GRAPH_BASE_URL, META_GRAPH_API_VERSION } from "@/lib/meta";
 import { BaseMessagingProvider } from "./base";
 import type { MessagingProvider, OutboundMessage, SendResult, InboundMessage } from "./provider";
 
-/**
- * Facebook Messenger via Meta's Messenger Platform.
- * Required env vars: META_APP_ID, META_APP_SECRET, META_VERIFY_TOKEN
- * (page access token is stored per-business after OAuth, encrypted).
- */
+/** Facebook Messenger via Meta's Messenger Platform. */
 class FacebookProvider extends BaseMessagingProvider implements MessagingProvider {
   readonly channel = "FACEBOOK" as const;
   protected dbProvider = "FACEBOOK" as const;
@@ -19,18 +17,20 @@ class FacebookProvider extends BaseMessagingProvider implements MessagingProvide
 
   async getConnectUrl(businessId: string): Promise<string | null> {
     if (!this.isConfigured()) return null;
-    const redirectUri = `${process.env.APP_BASE_URL ?? process.env.NEXTAUTH_URL}/api/integrations/facebook/callback`;
+    const baseUrl = process.env.APP_BASE_URL ?? process.env.NEXTAUTH_URL;
+    if (!baseUrl) throw new Error("APP_BASE_URL is required for Meta OAuth");
+    const redirectUri = `${baseUrl}/api/integrations/facebook/callback`;
     const params = new URLSearchParams({
       client_id: process.env.META_APP_ID!,
       redirect_uri: redirectUri,
-      state: businessId,
+      state: createOAuthState(businessId, "FACEBOOK"),
       response_type: "code",
       scope: "pages_messaging,pages_show_list,pages_manage_metadata",
     });
-    return `https://www.facebook.com/v21.0/dialog/oauth?${params.toString()}`;
+    return `https://www.facebook.com/${META_GRAPH_API_VERSION}/dialog/oauth?${params.toString()}`;
   }
 
-  async sendMessage(businessId: string, _message: OutboundMessage): Promise<SendResult> {
+  async sendMessage(businessId: string, message: OutboundMessage): Promise<SendResult> {
     const integration = await prisma.integration.findUnique({
       where: { businessId_provider: { businessId, provider: "FACEBOOK" } },
     });
@@ -40,18 +40,21 @@ class FacebookProvider extends BaseMessagingProvider implements MessagingProvide
     if (integration.status === "MOCK" || !this.isConfigured()) {
       return { providerMessageId: `mock_fb_${crypto.randomUUID()}`, status: "SENT" };
     }
-
-    if (!integration.encryptedCredentials) {
-      throw new Error("No Facebook Page access token on file — reconnect the account");
+    if (!integration.encryptedCredentials || !integration.externalAccountId) {
+      throw new Error("Facebook Page credentials are incomplete — reconnect the account");
     }
-    const { accessToken } = decryptCredentials<{ accessToken: string }>(integration.encryptedCredentials);
 
-    const res = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${accessToken}`, {
+    const { accessToken } = decryptCredentials<{ accessToken: string }>(integration.encryptedCredentials);
+    const res = await fetch(`${META_GRAPH_BASE_URL}/${integration.externalAccountId}/messages`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
-        recipient: { id: _message.to },
-        message: { text: _message.text ?? "" },
+        recipient: { id: message.to },
+        messaging_type: "RESPONSE",
+        message: { text: message.text ?? "" },
       }),
     });
 
@@ -70,14 +73,14 @@ class FacebookProvider extends BaseMessagingProvider implements MessagingProvide
       entry?: Array<{
         messaging?: Array<{
           sender?: { id?: string };
-          message?: { mid?: string; text?: string };
+          message?: { mid?: string; text?: string; is_echo?: boolean };
           timestamp?: number;
         }>;
       }>;
     };
     for (const entry of body.entry ?? []) {
       for (const event of entry.messaging ?? []) {
-        if (!event.sender?.id || !event.message) continue;
+        if (!event.sender?.id || !event.message || event.message.is_echo) continue;
         results.push({
           externalConversationId: event.sender.id,
           from: event.sender.id,
@@ -95,7 +98,9 @@ class FacebookProvider extends BaseMessagingProvider implements MessagingProvide
     if (!appSecret || !input.signatureHeader) return false;
     const expected = "sha256=" + crypto.createHmac("sha256", appSecret).update(input.payload).digest("hex");
     try {
-      return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(input.signatureHeader));
+      const a = Buffer.from(expected);
+      const b = Buffer.from(input.signatureHeader);
+      return a.length === b.length && crypto.timingSafeEqual(a, b);
     } catch {
       return false;
     }
