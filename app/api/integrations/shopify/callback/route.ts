@@ -43,6 +43,7 @@ export async function GET(req: Request) {
 
   try {
     const accessToken = await exchangeShopifyCode(shop, code);
+    const routingKey = `SHOPIFY:${shop}`;
 
     await prisma.shopifyStore.upsert({
       where: { businessId },
@@ -67,6 +68,7 @@ export async function GET(req: Request) {
         status: "CONNECTED",
         externalAccountId: shop,
         externalAccountName: shop,
+        routingKey,
         connectedAt: new Date(),
         lastSyncAt: new Date(),
       },
@@ -74,6 +76,7 @@ export async function GET(req: Request) {
         status: "CONNECTED",
         externalAccountId: shop,
         externalAccountName: shop,
+        routingKey,
         connectedAt: new Date(),
         lastError: null,
       },
