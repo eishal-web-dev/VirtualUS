@@ -21,8 +21,6 @@ function requiredEnv(name: string): string {
     value = value.slice(1, -1).trim();
   }
 
-  // People often paste the entire Authorization value into Vercel. Telnyx
-  // expects us to add the Bearer prefix ourselves, so normalize it here.
   if (name === "TELNYX_API_KEY") {
     value = value.replace(/^Bearer\s+/i, "").trim();
   }
@@ -71,8 +69,33 @@ type NumberOrderResponse = {
 };
 
 type PhoneNumbersResponse = {
-  data?: Array<{ id: string; phone_number: string; status?: string }>;
+  data?: Array<{
+    id: string;
+    phone_number: string;
+    status?: string;
+    connection_id?: string | null;
+    messaging_profile_id?: string | null;
+  }>;
 };
+
+export type OwnedTelnyxNumber = {
+  id: string;
+  phoneNumber: string;
+  status: string | null;
+  connectionId: string | null;
+  messagingProfileId: string | null;
+};
+
+export async function listOwnedTelnyxNumbers(): Promise<OwnedTelnyxNumber[]> {
+  const response = await telnyxRequest<PhoneNumbersResponse>("/phone_numbers?page[size]=50");
+  return (response.data ?? []).map((item) => ({
+    id: item.id,
+    phoneNumber: item.phone_number,
+    status: item.status ?? null,
+    connectionId: item.connection_id ?? null,
+    messagingProfileId: item.messaging_profile_id ?? null,
+  }));
+}
 
 function locationFromRegions(
   regions: Array<{ region_type?: string; region_name?: string }> | undefined,
