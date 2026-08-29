@@ -183,7 +183,9 @@ async function main() {
 
   const visibleToA = await prisma.customer.count({ where: { businessId: business1.id } });
   const visibleToB = await prisma.customer.count({ where: { businessId: business2.id } });
-  if (visibleToA !== 1 || visibleToB !== 1) {
+  // Business B has its original test customer plus the sender identity that
+  // the free in-app delivery intentionally created inside Business B only.
+  if (visibleToA !== 1 || visibleToB !== 2) {
     throw new Error(`Tenant smoke test failed: counts were ${visibleToA}/${visibleToB}`);
   }
 
