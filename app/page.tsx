@@ -7,23 +7,35 @@ import {
   Inbox,
   Phone,
   Users2,
-  ShoppingBag,
-  UsersRound,
   Sparkles,
+  MessageSquareText,
+  MessageCircle,
 } from "lucide-react";
 
 const features = [
-  {
-    title: "Unified Inbox",
-    desc: "Phone, SMS, WhatsApp, Facebook, Instagram, TikTok, and X — every conversation in one thread view.",
-    icon: Inbox,
-    gradient: "from-brand-500 to-indigo-500",
-  },
   {
     title: "Real US phone number",
     desc: "Pick from Chicago, New York, Miami, LA and more, then call and receive calls from the browser.",
     icon: Phone,
     gradient: "from-emerald-500 to-teal-500",
+  },
+  {
+    title: "SMS, live",
+    desc: "Send and receive text messages from your US number — delivered instantly, logged automatically.",
+    icon: MessageSquareText,
+    gradient: "from-sky-500 to-blue-500",
+  },
+  {
+    title: "WhatsApp, live",
+    desc: "Connect WhatsApp Business and message customers where they already are — no separate app needed.",
+    icon: MessageCircle,
+    gradient: "from-green-500 to-emerald-500",
+  },
+  {
+    title: "Unified Inbox",
+    desc: "Phone, SMS, WhatsApp, Facebook, Instagram, TikTok, and X — every conversation in one thread view.",
+    icon: Inbox,
+    gradient: "from-brand-500 to-indigo-500",
   },
   {
     title: "One customer, one timeline",
@@ -37,18 +49,6 @@ const features = [
     icon: Users2,
     gradient: "from-violet-500 to-purple-500",
   },
-  {
-    title: "Shopify-aware",
-    desc: "See a customer's orders and lifetime spend right next to their conversation.",
-    icon: ShoppingBag,
-    gradient: "from-lime-500 to-green-500",
-  },
-  {
-    title: "Built for teams",
-    desc: "Invite agents, assign conversations, and track response time across your whole team.",
-    icon: UsersRound,
-    gradient: "from-sky-500 to-blue-500",
-  },
 ];
 
 const steps = [
@@ -59,8 +59,8 @@ const steps = [
   },
   {
     step: "2",
-    title: "Connect your channels",
-    desc: "Claim a US number, then connect WhatsApp, Facebook, Instagram, and more as you need them.",
+    title: "Claim your number",
+    desc: "Pick a US area code — calls, SMS, and WhatsApp all work from it immediately.",
   },
   {
     step: "3",
@@ -73,6 +73,10 @@ const faqs = [
   {
     q: "Do I need to be based in the US to get a US number?",
     a: "No. You can sign up and get a US virtual number from anywhere in the world, then call and receive calls entirely through your browser.",
+  },
+  {
+    q: "Do calls, SMS, and WhatsApp actually work?",
+    a: "Yes — all three are live, not a demo. Your US number makes and receives real calls from the browser, sends and receives real SMS, and you can connect a real WhatsApp Business account to message from the same dashboard.",
   },
   {
     q: "Do I need to connect every channel to get started?",
@@ -147,23 +151,35 @@ export default function LandingPage() {
         <div className="mx-auto grid max-w-6xl items-center gap-10 px-6 pb-16 pt-20 lg:grid-cols-2 lg:pt-28">
           <div className="animate-fade-in-up text-center lg:text-left">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700">
-              <Sparkles size={12} /> Now supporting 8 channels
+              <Sparkles size={12} /> Calls · SMS · WhatsApp — all working today
             </span>
             <h1 className="mt-5 text-4xl font-semibold tracking-tight text-ink sm:text-6xl">
-              Every customer conversation.{" "}
-              <span className="bg-brand-gradient bg-clip-text text-transparent">One place.</span>
+              Get a real US phone number.{" "}
+              <span className="bg-brand-gradient bg-clip-text text-transparent">Call, text, and WhatsApp.</span>
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-lg text-black/60 lg:mx-0">
-              Phone, SMS, WhatsApp, and social DMs — plus a US business number and a lightweight
-              CRM — in one clean dashboard your whole team can work from.
+              Sign up from anywhere in the world and get a real US number in minutes. Make and
+              receive calls from your browser, send and receive SMS, and connect WhatsApp — all
+              live, all from one dashboard.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row lg:justify-start">
               <Link href="/signup">
-                <Button size="lg" variant="gradient">Get Started</Button>
+                <Button size="lg" variant="gradient">Get your US number</Button>
               </Link>
               <a href="#how-it-works">
                 <Button size="lg" variant="secondary">See how it works</Button>
               </a>
+            </div>
+            <div className="mx-auto mt-8 flex max-w-md flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-black/50 lg:mx-0 lg:justify-start">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Browser calling
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> SMS
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> WhatsApp
+              </span>
             </div>
           </div>
           <div className="relative mx-auto w-full max-w-md animate-scale-in lg:max-w-none">

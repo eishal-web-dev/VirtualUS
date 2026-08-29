@@ -3,9 +3,9 @@ import "./globals.css";
 import { AuthSessionProvider } from "@/components/auth-session-provider";
 
 export const metadata: Metadata = {
-  title: "Ashes Connect — Every customer conversation. One place.",
+  title: "Ashes Connect — Get a US phone number. Call, text, and WhatsApp.",
   description:
-    "Phone, SMS, WhatsApp, and social DMs — plus a US business number and a lightweight CRM — in one clean dashboard.",
+    "Get a real US phone number from anywhere in the world. Make and receive calls from your browser, send and receive SMS, and connect WhatsApp — all live, all in one dashboard.",
 };
 
 export default function RootLayout({
