@@ -66,9 +66,9 @@ npx prisma generate
 ```
 
 This applies the checked-in migrations, including the base phone/CRM schema
-and the free in-app WebRTC signaling tables. Production deployments should run
-`npm run prisma:deploy` against the production database before the new app
-version receives traffic.
+and the free in-app WebRTC signaling tables. Vercel uses `npm run vercel-build`,
+which runs `prisma migrate deploy` before compiling the production app. Other
+hosts should run `npm run prisma:deploy` before the new version receives traffic.
 
 Optional demo user:
 
