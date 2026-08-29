@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import twilio from "twilio";
 import { prisma } from "@/lib/prisma";
-import { getTelecomProvider } from "@/lib/telecom";
+import { getTelecomProviderForBusiness } from "@/lib/telecom";
 import { resolveOrCreateCustomer, recordMessage } from "@/lib/inbox";
 
 const { VoiceResponse } = twilio.twiml;
@@ -13,17 +13,6 @@ export async function POST(req: Request) {
     params[key] = String(value);
   });
 
-  const signature = req.headers.get("x-twilio-signature");
-  const provider = getTelecomProvider();
-  const url = process.env.APP_BASE_URL
-    ? `${process.env.APP_BASE_URL}/api/twilio/voice/incoming`
-    : req.url;
-
-  const validSignature = provider.validateWebhookSignature({ url, params, signatureHeader: signature });
-  if (!validSignature && process.env.NODE_ENV === "production") {
-    return new NextResponse("Invalid signature", { status: 403 });
-  }
-
   const response = new VoiceResponse();
   const to = params.To;
   const from = params.From;
@@ -32,6 +21,16 @@ export async function POST(req: Request) {
   if (!ownedNumber || !ownedNumber.businessId) {
     response.say("This number is not currently in service.");
     return xmlResponse(response);
+  }
+
+  const signature = req.headers.get("x-twilio-signature");
+  const provider = await getTelecomProviderForBusiness(ownedNumber.businessId);
+  const url = process.env.APP_BASE_URL
+    ? `${process.env.APP_BASE_URL}/api/twilio/voice/incoming`
+    : req.url;
+  const validSignature = provider.validateWebhookSignature({ url, params, signatureHeader: signature });
+  if ((!validSignature || provider.name !== "twilio") && process.env.NODE_ENV === "production") {
+    return new NextResponse("Invalid signature", { status: 403 });
   }
 
   if (params.CallSid && from) {

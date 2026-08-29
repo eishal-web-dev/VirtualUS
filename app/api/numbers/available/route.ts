@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireTenant } from "@/lib/tenant";
 import { areaCodeSchema } from "@/lib/validation";
-import { getTelecomProvider, isTelecomConfigured } from "@/lib/telecom";
+import { getTelecomProviderForBusiness } from "@/lib/telecom";
+import { prisma } from "@/lib/prisma";
 
 export async function GET(req: Request) {
   const tenant = await requireTenant();
@@ -18,20 +19,17 @@ export async function GET(req: Request) {
     );
   }
 
-  if (!isTelecomConfigured()) {
-    return NextResponse.json(
-      {
-        error: "Phone service is not connected yet. Add the Telnyx API key to the Ashes Connect production environment.",
-        providerSetupRequired: true,
-        provider: getTelecomProvider().name,
-      },
-      { status: 503 }
-    );
-  }
-
   try {
-    const provider = getTelecomProvider();
-    const numbers = await provider.searchAvailableNumbers(parsed.data, 10);
+    const provider = await getTelecomProviderForBusiness(tenant.businessId);
+    let numbers = await provider.searchAvailableNumbers(parsed.data, provider.name === "demo" ? 100 : 10);
+    if (provider.name === "demo") {
+      const assigned = await prisma.phoneNumber.findMany({
+        where: { number: { in: numbers.map((number) => number.phoneNumber) } },
+        select: { number: true },
+      });
+      const used = new Set(assigned.map((number) => number.number));
+      numbers = numbers.filter((number) => !used.has(number.phoneNumber)).slice(0, 10);
+    }
     return NextResponse.json({ numbers, provider: provider.name });
   } catch (err) {
     console.error("[numbers/available] provider error", err);

@@ -1,20 +1,23 @@
 import { NextResponse } from "next/server";
 import { requireTenant } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
-import { getTelecomProvider } from "@/lib/telecom";
+import { getTelecomProviderForBusiness } from "@/lib/telecom";
 import { listOwnedTelnyxNumbers } from "@/lib/telecom/telnyx";
+import { getTelnyxApiKeyForBusiness } from "@/lib/telecom/connection";
 
 export async function GET() {
   const tenant = await requireTenant();
   if (tenant instanceof NextResponse) return tenant;
 
-  const provider = getTelecomProvider();
+  const provider = await getTelecomProviderForBusiness(tenant.businessId);
   if (provider.name !== "telnyx") {
     return NextResponse.json({ numbers: [] });
   }
 
   try {
-    const owned = await listOwnedTelnyxNumbers();
+    const apiKey = await getTelnyxApiKeyForBusiness(tenant.businessId);
+    if (!apiKey) return NextResponse.json({ numbers: [] });
+    const owned = await listOwnedTelnyxNumbers(apiKey);
     if (owned.length === 0) return NextResponse.json({ numbers: [] });
 
     const alreadyAssigned = await prisma.phoneNumber.findMany({

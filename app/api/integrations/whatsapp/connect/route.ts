@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireTenant, requireRole } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
-import { hasTelnyxApiKey } from "@/lib/telnyx-api";
+import { getTelnyxApiKeyForBusiness } from "@/lib/telecom/connection";
 import { whatsAppProvider } from "@/lib/messaging/whatsapp";
 
 /**
@@ -20,7 +20,7 @@ export async function POST() {
   const roleCheck = requireRole(tenant, ["OWNER", "ADMIN"]);
   if (roleCheck) return roleCheck;
 
-  if (hasTelnyxApiKey()) {
+  if (await getTelnyxApiKeyForBusiness(tenant.businessId)) {
     try {
       const sync = await whatsAppProvider.syncTelnyxConnection(tenant.businessId);
       const integration = await prisma.integration.findUnique({

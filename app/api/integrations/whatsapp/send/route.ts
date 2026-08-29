@@ -4,6 +4,7 @@ import { whatsAppProvider } from "@/lib/messaging/whatsapp";
 import { resolveOrCreateCustomer, recordMessage } from "@/lib/inbox";
 import { e164Schema } from "@/lib/validation";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { deliverInAppMessage } from "@/lib/messaging/in-app-delivery";
 import { z } from "zod";
 
 const sendSchema = z.object({
@@ -55,7 +56,24 @@ export async function POST(req: Request) {
       senderUserId: tenant.userId,
     });
 
-    return NextResponse.json({ conversation, message, mode: result.providerMessageId.startsWith("mock_") ? "mock" : "live" }, { status: 201 });
+    if (result.providerMessageId.startsWith("demo_wa_")) {
+      await deliverInAppMessage({
+        senderBusinessId: tenant.businessId,
+        to: parsed.data.to,
+        text: parsed.data.text,
+        channel: "WHATSAPP",
+        providerMessageId: result.providerMessageId,
+      });
+    }
+
+    return NextResponse.json(
+      {
+        conversation,
+        message,
+        mode: result.providerMessageId.startsWith("demo_wa_") ? "ashes_network" : "live",
+      },
+      { status: 201 }
+    );
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Could not send WhatsApp message" },

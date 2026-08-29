@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getMessagingProvider } from "@/lib/messaging";
 import { recordMessage } from "@/lib/inbox";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { deliverInAppMessage } from "@/lib/messaging/in-app-delivery";
 import { z } from "zod";
 
 const sendSchema = z.object({
@@ -70,6 +71,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       providerMessageId: result.providerMessageId,
       senderUserId: tenant.userId,
     });
+
+    if (
+      (conversation.channel === "SMS" && result.providerMessageId.startsWith("demo_sms_")) ||
+      (conversation.channel === "WHATSAPP" && result.providerMessageId.startsWith("demo_wa_"))
+    ) {
+      await deliverInAppMessage({
+        senderBusinessId: tenant.businessId,
+        to: recipient,
+        text: parsed.data.text,
+        channel: conversation.channel,
+        providerMessageId: result.providerMessageId,
+      });
+    }
 
     return NextResponse.json({ message }, { status: 201 });
   } catch (err) {

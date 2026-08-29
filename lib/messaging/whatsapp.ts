@@ -5,11 +5,11 @@ import { createOAuthState } from "@/lib/oauth-state";
 import { META_GRAPH_BASE_URL, META_GRAPH_API_VERSION } from "@/lib/meta";
 import {
   appBaseUrl,
-  hasTelnyxApiKey,
   normalizePhoneNumber,
   telnyxApi,
   telnyxWebhookToken,
 } from "@/lib/telnyx-api";
+import { getTelnyxApiKeyForBusiness } from "@/lib/telecom/connection";
 import { BaseMessagingProvider } from "./base";
 import type {
   MessagingProvider,
@@ -68,7 +68,6 @@ class WhatsAppProvider extends BaseMessagingProvider implements MessagingProvide
   protected dbProvider = "WHATSAPP" as const;
 
   isConfigured(): boolean {
-    if (hasTelnyxApiKey()) return true;
     return Boolean(
       process.env.META_APP_ID &&
         process.env.META_APP_SECRET &&
@@ -77,21 +76,21 @@ class WhatsAppProvider extends BaseMessagingProvider implements MessagingProvide
     );
   }
 
-  private usesTelnyx(): boolean {
-    return hasTelnyxApiKey();
-  }
-
   /** Ensure the business's Telnyx number has a messaging profile and that
    * its webhook points at Ashes Connect. WhatsApp Embedded Signup requires
    * a Telnyx-owned number with an active messaging profile. */
-  private async ensureTelnyxMessagingProfile(businessId: string, phoneNumber: string): Promise<string> {
+  private async ensureTelnyxMessagingProfile(
+    businessId: string,
+    phoneNumber: string,
+    apiKey: string
+  ): Promise<string> {
     const webhookUrl = telnyxMessagesWebhookUrl();
     let messagingProfileId: string | null = null;
 
     try {
       const settings = await telnyxApi<{
         data?: { messaging_profile_id?: string | null };
-      }>(`/messaging_phone_numbers/${encodeURIComponent(phoneNumber)}`);
+      }>(`/messaging_phone_numbers/${encodeURIComponent(phoneNumber)}`, {}, apiKey);
       messagingProfileId = settings.data?.messaging_profile_id ?? null;
     } catch {
       // A freshly provisioned number can exist before its messaging settings
@@ -100,33 +99,45 @@ class WhatsAppProvider extends BaseMessagingProvider implements MessagingProvide
     }
 
     if (!messagingProfileId) {
-      const created = await telnyxApi<{ data?: TelnyxMessagingProfile }>("/messaging_profiles", {
-        method: "POST",
-        body: JSON.stringify({
-          name: `Ashes Connect ${businessId.slice(-8)}`,
-          enabled: true,
-          webhook_url: webhookUrl,
-          webhook_api_version: "2",
-          whitelisted_destinations: ["*"],
-        }),
-      });
+      const created = await telnyxApi<{ data?: TelnyxMessagingProfile }>(
+        "/messaging_profiles",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name: `Ashes Connect ${businessId.slice(-8)}`,
+            enabled: true,
+            webhook_url: webhookUrl,
+            webhook_api_version: "2",
+            whitelisted_destinations: ["*"],
+          }),
+        },
+        apiKey
+      );
       messagingProfileId = created.data?.id ?? null;
       if (!messagingProfileId) throw new Error("Telnyx did not return a messaging profile id");
 
-      await telnyxApi(`/messaging_phone_numbers/${encodeURIComponent(phoneNumber)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ messaging_profile_id: messagingProfileId }),
-      });
+      await telnyxApi(
+        `/messaging_phone_numbers/${encodeURIComponent(phoneNumber)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ messaging_profile_id: messagingProfileId }),
+        },
+        apiKey
+      );
     } else {
       // Keep the existing profile, but make sure inbound SMS/WhatsApp events
       // reach the shared Telnyx webhook used by Ashes Connect.
-      await telnyxApi(`/messaging_profiles/${encodeURIComponent(messagingProfileId)}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          webhook_url: webhookUrl,
-          webhook_api_version: "2",
-        }),
-      });
+      await telnyxApi(
+        `/messaging_profiles/${encodeURIComponent(messagingProfileId)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            webhook_url: webhookUrl,
+            webhook_api_version: "2",
+          }),
+        },
+        apiKey
+      );
     }
 
     return messagingProfileId;
@@ -142,7 +153,8 @@ class WhatsAppProvider extends BaseMessagingProvider implements MessagingProvide
     message?: string;
     status?: string;
   }> {
-    if (!this.usesTelnyx()) {
+    const apiKey = await getTelnyxApiKeyForBusiness(businessId);
+    if (!apiKey) {
       return { connected: false, onboardingRequired: false };
     }
 
@@ -155,10 +167,12 @@ class WhatsAppProvider extends BaseMessagingProvider implements MessagingProvide
     }
 
     const phoneNumber = normalizePhoneNumber(owned.number);
-    const messagingProfileId = await this.ensureTelnyxMessagingProfile(businessId, phoneNumber);
+    const messagingProfileId = await this.ensureTelnyxMessagingProfile(businessId, phoneNumber, apiKey);
 
     const phones = await telnyxApi<{ data?: TelnyxWhatsAppPhone[] }>(
-      "/whatsapp/phone_numbers?page[size]=100"
+      "/whatsapp/phone_numbers?page[size]=100",
+      {},
+      apiKey
     );
     const waPhone = (phones.data ?? []).find(
       (item) => normalizePhoneNumber(item.phone_number) === phoneNumber
@@ -200,7 +214,9 @@ class WhatsAppProvider extends BaseMessagingProvider implements MessagingProvide
     }
 
     const wabas = await telnyxApi<{ data?: TelnyxWaba[] }>(
-      "/whatsapp/business_accounts?page[size]=100"
+      "/whatsapp/business_accounts?page[size]=100",
+      {},
+      apiKey
     );
     const waba = (wabas.data ?? []).find(
       (item) => item.waba_id === waPhone.waba_id || item.id === waPhone.waba_id
@@ -213,13 +229,17 @@ class WhatsAppProvider extends BaseMessagingProvider implements MessagingProvide
     if (ready && waba?.id) {
       // Telnyx accepts a WABA-level webhook URL. Point it to our shared
       // signed callback so inbound WhatsApp messages land in Unified Inbox.
-      await telnyxApi(`/whatsapp/business_accounts/${encodeURIComponent(waba.id)}/settings`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          webhook_url: telnyxMessagesWebhookUrl(),
-          webhook_enabled: true,
-        }),
-      });
+      await telnyxApi(
+        `/whatsapp/business_accounts/${encodeURIComponent(waba.id)}/settings`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            webhook_url: telnyxMessagesWebhookUrl(),
+            webhook_enabled: true,
+          }),
+        },
+        apiKey
+      );
     }
 
     const externalAccountName =
@@ -284,7 +304,7 @@ class WhatsAppProvider extends BaseMessagingProvider implements MessagingProvide
   }
 
   async getConnectUrl(businessId: string): Promise<string | null> {
-    if (this.usesTelnyx()) return "https://portal.telnyx.com/";
+    if (await getTelnyxApiKeyForBusiness(businessId)) return "https://portal.telnyx.com/";
     if (!this.isConfigured()) return null;
     const redirectUri = `${appBaseUrl()}/api/integrations/whatsapp/callback`;
     const params = new URLSearchParams({
@@ -306,7 +326,20 @@ class WhatsAppProvider extends BaseMessagingProvider implements MessagingProvide
       throw new Error("WhatsApp is not connected for this business");
     }
     if (integration.status === "MOCK") {
-      return { providerMessageId: `mock_wa_${crypto.randomUUID()}`, status: "SENT" };
+      const [fromNumber, recipient] = await Promise.all([
+        prisma.phoneNumber.findFirst({
+          where: { businessId, provider: "demo", status: "ACTIVE" },
+        }),
+        prisma.phoneNumber.findFirst({
+          where: { number: message.to, provider: "demo", status: "ACTIVE" },
+        }),
+      ]);
+      if (!fromNumber || !recipient) {
+        throw new Error(
+          "Free WhatsApp-style chat works only between Ashes demo numbers. Real WhatsApp requires customer-owned Meta/carrier onboarding."
+        );
+      }
+      return { providerMessageId: `demo_wa_${crypto.randomUUID()}`, status: "SENT" };
     }
     if (integration.status !== "CONNECTED") {
       throw new Error("WhatsApp setup is still pending. Finish verification and reconnect first.");
@@ -317,18 +350,24 @@ class WhatsAppProvider extends BaseMessagingProvider implements MessagingProvide
       const from = config.phoneNumber;
       if (!from) throw new Error("WhatsApp sender number is missing — reconnect the Telnyx account");
 
-      const response = await telnyxApi<{ data?: { id?: string } }>("/messages/whatsapp", {
-        method: "POST",
-        body: JSON.stringify({
-          from,
-          to: message.to,
-          whatsapp_message: {
-            type: "text",
-            text: { body: message.text ?? "", preview_url: false },
-          },
-          webhook_url: telnyxMessagesWebhookUrl(),
-        }),
-      });
+      const apiKey = await getTelnyxApiKeyForBusiness(businessId);
+      if (!apiKey) throw new Error("The customer's Telnyx connection is unavailable");
+      const response = await telnyxApi<{ data?: { id?: string } }>(
+        "/messages/whatsapp",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            from,
+            to: message.to,
+            whatsapp_message: {
+              type: "text",
+              text: { body: message.text ?? "", preview_url: false },
+            },
+            webhook_url: telnyxMessagesWebhookUrl(),
+          }),
+        },
+        apiKey
+      );
 
       return {
         providerMessageId: response.data?.id ?? crypto.randomUUID(),

@@ -7,35 +7,13 @@ import type {
 
 const API_BASE = "https://api.telnyx.com/v2";
 
-function requiredEnv(name: string): string {
-  const raw = process.env[name];
-  if (!raw) throw new Error(`Missing required env var: ${name}`);
-
-  let value = raw.trim();
-  value = value.replace(new RegExp(`^${name}\\s*=\\s*`, "i"), "").trim();
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'")) ||
-    (value.startsWith("`") && value.endsWith("`"))
-  ) {
-    value = value.slice(1, -1).trim();
-  }
-
-  if (name === "TELNYX_API_KEY") {
-    value = value.replace(/^Bearer\s+/i, "").trim();
-  }
-
-  if (!value) throw new Error(`Missing required env var: ${name}`);
-  return value;
-}
-
 type TelnyxError = {
   errors?: Array<{ code?: string; title?: string; detail?: string }>;
 };
 
-async function telnyxRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function telnyxRequest<T>(apiKey: string, path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${requiredEnv("TELNYX_API_KEY")}`);
+  headers.set("Authorization", `Bearer ${apiKey}`);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
 
   const response = await fetch(`${API_BASE}${path}`, {
@@ -86,8 +64,8 @@ export type OwnedTelnyxNumber = {
   messagingProfileId: string | null;
 };
 
-export async function listOwnedTelnyxNumbers(): Promise<OwnedTelnyxNumber[]> {
-  const response = await telnyxRequest<PhoneNumbersResponse>("/phone_numbers?page[size]=50");
+export async function listOwnedTelnyxNumbers(apiKey: string): Promise<OwnedTelnyxNumber[]> {
+  const response = await telnyxRequest<PhoneNumbersResponse>(apiKey, "/phone_numbers?page[size]=50");
   return (response.data ?? []).map((item) => ({
     id: item.id,
     phoneNumber: item.phone_number,
@@ -107,6 +85,8 @@ function locationFromRegions(
 class TelnyxProvider implements TelecomProvider {
   readonly name = "telnyx" as const;
 
+  constructor(private readonly apiKey: string) {}
+
   async searchAvailableNumbers(areaCode: string, limit = 10): Promise<AvailableNumber[]> {
     if (!/^\d{3}$/.test(areaCode)) throw new Error("areaCode must be a 3-digit US area code");
 
@@ -119,7 +99,10 @@ class TelnyxProvider implements TelecomProvider {
       "filter[best_effort]": "false",
     });
 
-    const response = await telnyxRequest<AvailableResponse>(`/available_phone_numbers?${params.toString()}`);
+    const response = await telnyxRequest<AvailableResponse>(
+      this.apiKey,
+      `/available_phone_numbers?${params.toString()}`
+    );
 
     return (response.data ?? []).slice(0, limit).map((item) => ({
       phoneNumber: item.phone_number,
@@ -144,12 +127,7 @@ class TelnyxProvider implements TelecomProvider {
       customer_reference: "ashes-connect",
     };
 
-    if (process.env.TELNYX_CONNECTION_ID) body.connection_id = process.env.TELNYX_CONNECTION_ID;
-    if (process.env.TELNYX_MESSAGING_PROFILE_ID) {
-      body.messaging_profile_id = process.env.TELNYX_MESSAGING_PROFILE_ID;
-    }
-
-    const order = await telnyxRequest<NumberOrderResponse>("/number_orders", {
+    const order = await telnyxRequest<NumberOrderResponse>(this.apiKey, "/number_orders", {
       method: "POST",
       body: JSON.stringify(body),
     });
@@ -158,7 +136,7 @@ class TelnyxProvider implements TelecomProvider {
     if (!orderId) throw new Error("Telnyx did not return a number order id");
 
     for (let attempt = 0; attempt < 8; attempt += 1) {
-      const current = await telnyxRequest<NumberOrderResponse>(`/number_orders/${orderId}`);
+      const current = await telnyxRequest<NumberOrderResponse>(this.apiKey, `/number_orders/${orderId}`);
       const status = current.data?.phone_numbers?.find((n) => n.phone_number === phoneNumber)?.status;
       if (status === "success") break;
       if (status && ["failed", "cancelled", "canceled"].includes(status)) {
@@ -171,7 +149,10 @@ class TelnyxProvider implements TelecomProvider {
       "filter[phone_number]": phoneNumber,
       "page[size]": "1",
     });
-    const owned = await telnyxRequest<PhoneNumbersResponse>(`/phone_numbers?${lookup.toString()}`);
+    const owned = await telnyxRequest<PhoneNumbersResponse>(
+      this.apiKey,
+      `/phone_numbers?${lookup.toString()}`
+    );
     const resource = owned.data?.find((n) => n.phone_number === phoneNumber);
 
     return {
@@ -188,11 +169,14 @@ class TelnyxProvider implements TelecomProvider {
         "filter[phone_number]": phoneNumber,
         "page[size]": "1",
       });
-      const owned = await telnyxRequest<PhoneNumbersResponse>(`/phone_numbers?${lookup.toString()}`);
+      const owned = await telnyxRequest<PhoneNumbersResponse>(
+        this.apiKey,
+        `/phone_numbers?${lookup.toString()}`
+      );
       id = owned.data?.find((n) => n.phone_number === phoneNumber)?.id ?? "";
     }
     if (!id) throw new Error("Could not resolve the Telnyx phone number resource");
-    await telnyxRequest(`/phone_numbers/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await telnyxRequest(this.apiKey, `/phone_numbers/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
   async createVoiceAccessToken(_identity: string): Promise<VoiceAccessToken> {
@@ -206,4 +190,6 @@ class TelnyxProvider implements TelecomProvider {
   }
 }
 
-export const telnyxProvider = new TelnyxProvider();
+export function createTelnyxProvider(apiKey: string): TelecomProvider {
+  return new TelnyxProvider(apiKey);
+}

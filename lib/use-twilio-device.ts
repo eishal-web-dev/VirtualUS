@@ -11,7 +11,7 @@ type IncomingCallInfo = {
   reject: () => void;
 };
 
-export function useTwilioDevice() {
+export function useTwilioDevice(enabled = true) {
   const deviceRef = useRef<Device | null>(null);
   const activeCallRef = useRef<Call | null>(null);
 
@@ -29,6 +29,11 @@ export function useTwilioDevice() {
   }, []);
 
   useEffect(() => {
+    if (!enabled) {
+      setReady(false);
+      setError(null);
+      return;
+    }
     let cancelled = false;
 
     async function init() {
@@ -108,7 +113,7 @@ export function useTwilioDevice() {
       deviceRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [enabled]);
 
   const startCall = useCallback(async (to: string) => {
     setError(null);

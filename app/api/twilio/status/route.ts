@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import twilio from "twilio";
 import { prisma } from "@/lib/prisma";
-import { getTelecomProvider } from "@/lib/telecom";
+import { getTelecomProviderForBusiness } from "@/lib/telecom";
 import type { CallStatus } from "@prisma/client";
 
 const { VoiceResponse } = twilio.twiml;
@@ -24,15 +24,6 @@ export async function POST(req: Request) {
     params[key] = String(value);
   });
 
-  const signature = req.headers.get("x-twilio-signature");
-  const provider = getTelecomProvider();
-  const url = process.env.APP_BASE_URL ? `${process.env.APP_BASE_URL}/api/twilio/status` : req.url;
-  const validSignature = provider.validateWebhookSignature({ url, params, signatureHeader: signature });
-
-  if (!validSignature && process.env.NODE_ENV === "production") {
-    return new NextResponse("Invalid signature", { status: 403 });
-  }
-
   // <Dial action> sends DialCallStatus / DialCallDuration while ordinary
   // status callbacks use CallStatus / CallDuration. The CallSid remains the
   // parent call SID we store in our database.
@@ -43,8 +34,23 @@ export async function POST(req: Request) {
   const rawPrice = params.Price ? Number(params.Price) : undefined;
   const price = rawPrice !== undefined && Number.isFinite(rawPrice) ? Math.abs(rawPrice) : undefined;
 
+  const existingForAuth = callSid
+    ? await prisma.call.findUnique({ where: { providerCallSid: callSid } })
+    : null;
+  if (existingForAuth?.businessId) {
+    const provider = await getTelecomProviderForBusiness(existingForAuth.businessId);
+    const signature = req.headers.get("x-twilio-signature");
+    const url = process.env.APP_BASE_URL ? `${process.env.APP_BASE_URL}/api/twilio/status` : req.url;
+    const validSignature = provider.validateWebhookSignature({ url, params, signatureHeader: signature });
+    if ((!validSignature || provider.name !== "twilio") && process.env.NODE_ENV === "production") {
+      return new NextResponse("Invalid signature", { status: 403 });
+    }
+  } else if (process.env.NODE_ENV === "production") {
+    return new NextResponse("Unknown call", { status: 404 });
+  }
+
   if (callSid && rawStatus && STATUS_MAP[rawStatus]) {
-    const existing = await prisma.call.findUnique({ where: { providerCallSid: callSid } });
+    const existing = existingForAuth;
     if (existing) {
       const terminal = ["completed", "busy", "failed", "no-answer", "canceled"].includes(rawStatus);
       await prisma.call.update({

@@ -1,24 +1,18 @@
 import twilio from "twilio";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
+import { getCarrierConnection, getTelnyxApiKeyForBusiness } from "@/lib/telecom/connection";
+import { telnyxApi } from "@/lib/telnyx-api";
 import { BaseMessagingProvider } from "./base";
 import type { MessagingProvider, OutboundMessage, SendResult, InboundMessage } from "./provider";
 
-/**
- * SMS via the same Twilio account already used for calling (Phase 1).
- * No separate connect flow needed — SMS is available the moment a
- * business has a Twilio number, using TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN.
- */
+/** SMS through the number owner's carrier, with free Ashes-to-Ashes delivery. */
 class SmsProvider extends BaseMessagingProvider implements MessagingProvider {
   readonly channel = "SMS" as const;
   protected dbProvider = "TWILIO" as const;
 
-  private get client() {
-    return twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-  }
-
   isConfigured(): boolean {
-    return Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN);
+    return true;
   }
 
   async getConnectUrl(): Promise<string | null> {
@@ -33,7 +27,41 @@ class SmsProvider extends BaseMessagingProvider implements MessagingProvider {
       throw new Error("This business has no active phone number to send SMS from");
     }
 
-    const sent = await this.client.messages.create({
+    if (fromNumber.provider === "demo") {
+      const recipient = await prisma.phoneNumber.findFirst({
+        where: { number: message.to, provider: "demo", status: "ACTIVE" },
+      });
+      if (!recipient) {
+        throw new Error(
+          "Free SMS works only between Ashes demo numbers. Connect the customer's carrier to text public phone numbers."
+        );
+      }
+      return { providerMessageId: `demo_sms_${crypto.randomUUID()}`, status: "SENT" };
+    }
+
+    const connection = await getCarrierConnection(businessId);
+    if (!connection) throw new Error("Connect the customer's carrier before sending public SMS");
+
+    if (connection.credentials.provider === "telnyx") {
+      const apiKey = await getTelnyxApiKeyForBusiness(businessId);
+      if (!apiKey) throw new Error("The customer's Telnyx connection is unavailable");
+      const sent = await telnyxApi<{ data?: { id?: string } }>(
+        "/messages",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            from: fromNumber.number,
+            to: message.to,
+            text: message.text ?? "",
+          }),
+        },
+        apiKey
+      );
+      return { providerMessageId: sent.data?.id ?? crypto.randomUUID(), status: "QUEUED" };
+    }
+
+    const client = twilio(connection.credentials.accountSid, connection.credentials.authToken);
+    const sent = await client.messages.create({
       from: fromNumber.number,
       to: message.to,
       body: message.text ?? "",
@@ -58,8 +86,7 @@ class SmsProvider extends BaseMessagingProvider implements MessagingProvider {
   }
 
   validateWebhookSignature(input: { payload: string; signatureHeader: string | null }): boolean {
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    if (!authToken || !input.signatureHeader) return false;
+    if (!input.signatureHeader) return false;
     // Twilio's helper validates against (url, params) rather than a raw
     // body string; the SMS webhook route performs that check directly via
     // twilio.validateRequest instead of this method (form-encoded body

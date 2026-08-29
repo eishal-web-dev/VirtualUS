@@ -75,7 +75,13 @@ export default function SettingsPage() {
         <p className="mt-1 text-sm text-black/60">Manage your profile and account.</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Link href="/dashboard/settings/telecom">
+          <Card className="p-4 transition-colors hover:border-black/20">
+            <p className="text-sm font-medium">Calling & SMS mode</p>
+            <p className="mt-1 text-xs text-black/50">Free network or customer-owned carrier →</p>
+          </Card>
+        </Link>
         <Link href="/dashboard/settings/integrations">
           <Card className="p-4 transition-colors hover:border-black/20">
             <p className="text-sm font-medium">Integrations</p>

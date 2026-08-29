@@ -6,17 +6,21 @@ import type {
   VoiceAccessToken,
 } from "./provider";
 
-function requiredEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing required env var: ${name}`);
-  return value;
-}
+export type TwilioProviderCredentials = {
+  accountSid: string;
+  authToken: string;
+  apiKey: string;
+  apiSecret: string;
+  twimlAppSid: string;
+};
 
 class TwilioProvider implements TelecomProvider {
   readonly name = "twilio" as const;
 
+  constructor(private readonly credentials: TwilioProviderCredentials) {}
+
   private get client() {
-    return twilio(requiredEnv("TWILIO_ACCOUNT_SID"), requiredEnv("TWILIO_AUTH_TOKEN"));
+    return twilio(this.credentials.accountSid, this.credentials.authToken);
   }
 
   async searchAvailableNumbers(areaCode: string, limit = 10): Promise<AvailableNumber[]> {
@@ -59,14 +63,14 @@ class TwilioProvider implements TelecomProvider {
     const VoiceGrant = AccessToken.VoiceGrant;
     const ttlSeconds = 3600;
     const token = new AccessToken(
-      requiredEnv("TWILIO_ACCOUNT_SID"),
-      requiredEnv("TWILIO_API_KEY"),
-      requiredEnv("TWILIO_API_SECRET"),
+      this.credentials.accountSid,
+      this.credentials.apiKey,
+      this.credentials.apiSecret,
       { identity, ttl: ttlSeconds }
     );
     token.addGrant(
       new VoiceGrant({
-        outgoingApplicationSid: requiredEnv("TWILIO_TWIML_APP_SID"),
+        outgoingApplicationSid: this.credentials.twimlAppSid,
         incomingAllow: true,
       })
     );
@@ -78,10 +82,12 @@ class TwilioProvider implements TelecomProvider {
     params: Record<string, string>;
     signatureHeader: string | null;
   }): boolean {
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const authToken = this.credentials.authToken;
     if (!authToken || !input.signatureHeader) return false;
     return twilio.validateRequest(authToken, input.signatureHeader, input.url, input.params);
   }
 }
 
-export const twilioProvider = new TwilioProvider();
+export function createTwilioProvider(credentials: TwilioProviderCredentials): TelecomProvider {
+  return new TwilioProvider(credentials);
+}

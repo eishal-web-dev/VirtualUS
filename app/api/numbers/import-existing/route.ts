@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireTenant, requireRole } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
-import { getTelecomProvider } from "@/lib/telecom";
+import { getTelecomProviderForBusiness } from "@/lib/telecom";
 import { listOwnedTelnyxNumbers } from "@/lib/telecom/telnyx";
+import { getTelnyxApiKeyForBusiness } from "@/lib/telecom/connection";
 
 function areaCodeFromNumber(phoneNumber: string): string {
   const digits = phoneNumber.replace(/\D/g, "");
@@ -17,7 +18,7 @@ export async function POST(req: Request) {
   const roleCheck = requireRole(tenant, ["OWNER", "ADMIN"]);
   if (roleCheck) return roleCheck;
 
-  const provider = getTelecomProvider();
+  const provider = await getTelecomProviderForBusiness(tenant.businessId);
   if (provider.name !== "telnyx") {
     return NextResponse.json({ error: "Telnyx is not the active phone provider" }, { status: 400 });
   }
@@ -34,14 +35,18 @@ export async function POST(req: Request) {
   }
 
   const existingBusinessNumber = await prisma.phoneNumber.findFirst({
-    where: { businessId: tenant.businessId, status: "ACTIVE" },
+    where: { businessId: tenant.businessId, status: "ACTIVE", provider: { not: "demo" } },
   });
   if (existingBusinessNumber) {
     return NextResponse.json({ phoneNumber: existingBusinessNumber });
   }
 
   try {
-    const owned = await listOwnedTelnyxNumbers();
+    const apiKey = await getTelnyxApiKeyForBusiness(tenant.businessId);
+    if (!apiKey) {
+      return NextResponse.json({ error: "Connect your Telnyx account first" }, { status: 409 });
+    }
+    const owned = await listOwnedTelnyxNumbers(apiKey);
     const telnyxNumber = owned.find(
       (n) => n.id === body.id && n.phoneNumber === body.phoneNumber
     );
@@ -67,16 +72,21 @@ export async function POST(req: Request) {
       );
     }
 
-    const record = await prisma.phoneNumber.create({
-      data: {
-        userId: tenant.userId,
-        businessId: tenant.businessId,
-        number: telnyxNumber.phoneNumber,
-        provider: "telnyx",
-        providerSid: telnyxNumber.id,
-        areaCode: areaCodeFromNumber(telnyxNumber.phoneNumber),
-        status: "ACTIVE",
-      },
+    const record = await prisma.$transaction(async (tx) => {
+      await tx.phoneNumber.deleteMany({
+        where: { businessId: tenant.businessId, status: "ACTIVE", provider: "demo" },
+      });
+      return tx.phoneNumber.create({
+        data: {
+          userId: tenant.userId,
+          businessId: tenant.businessId,
+          number: telnyxNumber.phoneNumber,
+          provider: "telnyx",
+          providerSid: telnyxNumber.id,
+          areaCode: areaCodeFromNumber(telnyxNumber.phoneNumber),
+          status: "ACTIVE",
+        },
+      });
     });
 
     return NextResponse.json({ phoneNumber: record }, { status: 201 });

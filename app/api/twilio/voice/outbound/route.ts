@@ -3,7 +3,7 @@ import twilio from "twilio";
 import { prisma } from "@/lib/prisma";
 import { isValidE164 } from "@/lib/validation";
 import { checkRateLimit, CALL_RATE_LIMIT } from "@/lib/rate-limit";
-import { getTelecomProvider } from "@/lib/telecom";
+import { getTelecomProviderForBusiness } from "@/lib/telecom";
 import { resolveOrCreateCustomer, recordMessage } from "@/lib/inbox";
 
 const { VoiceResponse } = twilio.twiml;
@@ -14,17 +14,6 @@ export async function POST(req: Request) {
   formData.forEach((value, key) => {
     params[key] = String(value);
   });
-
-  const signature = req.headers.get("x-twilio-signature");
-  const provider = getTelecomProvider();
-  const url = process.env.APP_BASE_URL
-    ? `${process.env.APP_BASE_URL}/api/twilio/voice/outbound`
-    : req.url;
-
-  const validSignature = provider.validateWebhookSignature({ url, params, signatureHeader: signature });
-  if (!validSignature && process.env.NODE_ENV === "production") {
-    return new NextResponse("Invalid signature", { status: 403 });
-  }
 
   const response = new VoiceResponse();
   const fromClient = params.From ?? "";
@@ -50,6 +39,16 @@ export async function POST(req: Request) {
   if (!membership) {
     response.say("Your account is not linked to a business.");
     return xmlResponse(response);
+  }
+
+  const signature = req.headers.get("x-twilio-signature");
+  const provider = await getTelecomProviderForBusiness(membership.businessId);
+  const url = process.env.APP_BASE_URL
+    ? `${process.env.APP_BASE_URL}/api/twilio/voice/outbound`
+    : req.url;
+  const validSignature = provider.validateWebhookSignature({ url, params, signatureHeader: signature });
+  if ((!validSignature || provider.name !== "twilio") && process.env.NODE_ENV === "production") {
+    return new NextResponse("Invalid signature", { status: 403 });
   }
 
   const ownedNumber = await prisma.phoneNumber.findFirst({

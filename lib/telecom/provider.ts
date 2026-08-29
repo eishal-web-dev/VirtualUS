@@ -20,7 +20,7 @@ export type VoiceAccessToken = {
 };
 
 export interface TelecomProvider {
-  readonly name: "twilio" | "telnyx";
+  readonly name: "twilio" | "telnyx" | "demo";
 
   /** Search numbers that support both Voice and SMS for the MVP. */
   searchAvailableNumbers(areaCode: string, limit?: number): Promise<AvailableNumber[]>;

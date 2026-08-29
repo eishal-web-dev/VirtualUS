@@ -1,21 +1,22 @@
 import type { TelecomProvider } from "./provider";
-import { telnyxProvider } from "./telnyx";
-import { twilioProvider } from "./twilio";
+import { createTelnyxProvider } from "./telnyx";
+import { createTwilioProvider } from "./twilio";
+import { demoTelecomProvider } from "./demo";
+import { getCarrierConnection } from "./connection";
 
 /**
- * Provider switch for Ashes Connect telecom.
- * Telnyx is the production default; Twilio remains available as an explicit
- * legacy fallback via TELECOM_PROVIDER=twilio.
+ * Resolve the carrier belonging to one business. Without a customer-owned
+ * connection, Ashes uses its free internal demo provider and cannot incur a
+ * PSTN charge.
  */
-export function getTelecomProvider(): TelecomProvider {
-  return process.env.TELECOM_PROVIDER?.toLowerCase() === "twilio" ? twilioProvider : telnyxProvider;
-}
-
-export function isTelecomConfigured(): boolean {
-  if (process.env.TELECOM_PROVIDER?.toLowerCase() === "twilio") {
-    return Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN);
+export async function getTelecomProviderForBusiness(businessId: string): Promise<TelecomProvider> {
+  const connection = await getCarrierConnection(businessId);
+  if (!connection) return demoTelecomProvider;
+  if (connection.credentials.provider === "twilio") {
+    return createTwilioProvider(connection.credentials);
   }
-  return Boolean(process.env.TELNYX_API_KEY);
+  return createTelnyxProvider(connection.credentials.apiKey);
 }
 
 export type { AvailableNumber, ProvisionedNumber, VoiceAccessToken, TelecomProvider } from "./provider";
+export type { CarrierCredentials, CarrierConnection } from "./connection";

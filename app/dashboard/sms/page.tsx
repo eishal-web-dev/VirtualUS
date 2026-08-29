@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { InboxClient } from "@/components/inbox-client";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,18 @@ export default function SmsPage() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [key, setKey] = useState(0); // bump to force InboxClient refresh
+  const [numberMode, setNumberMode] = useState<"demo" | "live" | null>(null);
+
+  useEffect(() => {
+    fetch("/api/numbers/me")
+      .then((response) => response.json())
+      .then((data) =>
+        setNumberMode(
+          !data.phoneNumber ? null : data.phoneNumber.provider === "demo" ? "demo" : "live"
+        )
+      )
+      .catch(() => setNumberMode(null));
+  }, []);
 
   async function handleSend() {
     setSending(true);
@@ -41,12 +53,24 @@ export default function SmsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">SMS</h1>
-          <p className="mt-1 text-sm text-black/60">Text message conversations from your US number.</p>
+          <p className="mt-1 text-sm text-black/60">
+            {numberMode === "demo"
+              ? "Free texts between Ashes demo numbers."
+              : numberMode === "live"
+                ? "Text conversations through the customer's connected carrier."
+                : "Choose a number to start texting."}
+          </p>
         </div>
         <Button size="sm" onClick={() => setOpen((o) => !o)}>
           New SMS
         </Button>
       </div>
+
+      {numberMode === "demo" && (
+        <Card className="border-blue-100 bg-blue-50/50 p-4 text-sm text-blue-800">
+          PKR 0 mode is active. Messages deliver only to another active Ashes demo number—not to ordinary mobile phones.
+        </Card>
+      )}
 
       {open && (
         <Card className="space-y-3 p-4">

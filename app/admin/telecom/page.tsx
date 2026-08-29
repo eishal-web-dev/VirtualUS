@@ -1,11 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { Card, Badge } from "@/components/ui/card";
 
-// Illustrative flat-rate placeholders for cost estimation. Replace with
-// real Twilio pricing API lookups once available.
-const NUMBER_MONTHLY_COST_USD = 1.15;
-const PER_MINUTE_COST_USD = 0.013;
-
 export default async function AdminTelecomPage() {
   const numbers = await prisma.phoneNumber.findMany({
     where: { status: "ACTIVE" },
@@ -17,18 +12,19 @@ export default async function AdminTelecomPage() {
     (sum, n) => sum + n.calls.reduce((s, c) => s + c.duration, 0) / 60,
     0
   );
-  const estimatedMonthlyCost = numbers.length * NUMBER_MONTHLY_COST_USD + totalMinutes * PER_MINUTE_COST_USD;
+  const demoNumbers = numbers.filter((number) => number.provider === "demo").length;
+  const customerCarrierNumbers = numbers.length - demoNumbers;
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Telecom</h1>
-        <p className="mt-1 text-sm text-black/60">Provisioned numbers and estimated provider cost.</p>
+        <p className="mt-1 text-sm text-black/60">Free-network and customer-owned carrier usage.</p>
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Card className="p-4">
-          <p className="text-xs text-black/50">Numbers provisioned</p>
+          <p className="text-xs text-black/50">Active numbers</p>
           <p className="mt-1.5 text-xl font-semibold">{numbers.length}</p>
         </Card>
         <Card className="p-4">
@@ -36,12 +32,13 @@ export default async function AdminTelecomPage() {
           <p className="mt-1.5 text-xl font-semibold">{Math.round(totalMinutes)}</p>
         </Card>
         <Card className="p-4">
-          <p className="text-xs text-black/50">Est. monthly provider cost</p>
-          <p className="mt-1.5 text-xl font-semibold">${estimatedMonthlyCost.toFixed(2)}</p>
+          <p className="text-xs text-black/50">Free demo numbers</p>
+          <p className="mt-1.5 text-xl font-semibold">{demoNumbers}</p>
         </Card>
         <Card className="p-4">
-          <p className="text-xs text-black/50">Provider</p>
-          <p className="mt-1.5 text-xl font-semibold">Twilio</p>
+          <p className="text-xs text-black/50">Ashes carrier spend</p>
+          <p className="mt-1.5 text-xl font-semibold">$0</p>
+          <p className="mt-1 text-[11px] text-black/40">{customerCarrierNumbers} customer billed</p>
         </Card>
       </div>
 
@@ -53,6 +50,7 @@ export default async function AdminTelecomPage() {
               <th className="px-5 py-3 font-medium">Business</th>
               <th className="px-5 py-3 font-medium">Area code</th>
               <th className="px-5 py-3 font-medium">Minutes used</th>
+              <th className="px-5 py-3 font-medium">Billing</th>
               <th className="px-5 py-3 font-medium">Status</th>
             </tr>
           </thead>
@@ -64,6 +62,9 @@ export default async function AdminTelecomPage() {
                 <td className="px-5 py-3 text-black/60">{n.areaCode}</td>
                 <td className="px-5 py-3 text-black/60">
                   {Math.round(n.calls.reduce((s, c) => s + c.duration, 0) / 60)}
+                </td>
+                <td className="px-5 py-3 text-black/60">
+                  {n.provider === "demo" ? "Free Ashes network" : "Customer carrier"}
                 </td>
                 <td className="px-5 py-3">
                   <Badge tone="green">{n.status.toLowerCase()}</Badge>

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireTenant, requireRole } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
 import { purchaseNumberSchema } from "@/lib/validation";
-import { getTelecomProvider } from "@/lib/telecom";
+import { getTelecomProviderForBusiness } from "@/lib/telecom";
 
 function provisioningError(err: unknown): { message: string; status: number } {
   const raw = err instanceof Error ? err.message : "";
@@ -55,8 +55,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid input", details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const existingCount = await prisma.phoneNumber.count({ where: { businessId, status: "ACTIVE" } });
-  if (existingCount >= 1) {
+  const provider = await getTelecomProviderForBusiness(businessId);
+  const existingNumbers = await prisma.phoneNumber.findMany({
+    where: { businessId, status: "ACTIVE" },
+  });
+  const hasLiveNumber = existingNumbers.some((number) => number.provider !== "demo");
+  const hasDemoNumber = existingNumbers.some((number) => number.provider === "demo");
+  if (hasLiveNumber || (provider.name === "demo" && hasDemoNumber)) {
     return NextResponse.json(
       { error: "Your business already has an active number. MVP allows one number per account." },
       { status: 409 }
@@ -68,7 +73,6 @@ export async function POST(req: Request) {
     process.env.NEXTAUTH_URL ??
     "https://ashes-connect-app.vercel.app";
 
-  const provider = getTelecomProvider();
   let provisioned: { phoneNumber: string; providerSid: string } | null = null;
   try {
     provisioned = await provider.purchaseNumber(
@@ -77,16 +81,23 @@ export async function POST(req: Request) {
       `${baseUrl}/api/twilio/sms/webhook`
     );
 
-    const record = await prisma.phoneNumber.create({
-      data: {
-        userId,
-        businessId,
-        number: provisioned.phoneNumber,
-        provider: provider.name,
-        providerSid: provisioned.providerSid,
-        areaCode: parsed.data.areaCode,
-        status: "ACTIVE",
-      },
+    const record = await prisma.$transaction(async (tx) => {
+      if (provider.name !== "demo") {
+        await tx.phoneNumber.deleteMany({
+          where: { businessId, status: "ACTIVE", provider: "demo" },
+        });
+      }
+      return tx.phoneNumber.create({
+        data: {
+          userId,
+          businessId,
+          number: provisioned!.phoneNumber,
+          provider: provider.name,
+          providerSid: provisioned!.providerSid,
+          areaCode: parsed.data.areaCode,
+          status: "ACTIVE",
+        },
+      });
     });
 
     return NextResponse.json({ phoneNumber: record }, { status: 201 });

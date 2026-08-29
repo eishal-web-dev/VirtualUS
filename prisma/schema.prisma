@@ -32,6 +32,19 @@ enum CallStatus {
   CANCELED
 }
 
+enum InAppCallStatus {
+  RINGING
+  CONNECTED
+  ENDED
+  REJECTED
+  FAILED
+}
+
+enum InAppCallSide {
+  CALLER
+  CALLEE
+}
+
 enum SubscriptionPlan {
   STARTER
   BUSINESS
@@ -193,6 +206,42 @@ model Call {
   @@map("calls")
 }
 
+model InAppCallSession {
+  id               String          @id
+  callerCallId     String          @unique
+  calleeCallId     String          @unique
+  callerUserId     String
+  callerBusinessId String
+  calleeBusinessId String
+  callerNumber     String
+  calleeNumber     String
+  offer            Json
+  answer           Json?
+  status           InAppCallStatus @default(RINGING)
+  connectedAt      DateTime?
+  endedAt          DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  candidates InAppCallCandidate[]
+
+  @@index([callerBusinessId, status])
+  @@index([calleeBusinessId, status])
+  @@map("in_app_call_sessions")
+}
+
+model InAppCallCandidate {
+  id        String           @id @default(cuid())
+  sessionId String
+  session   InAppCallSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  side      InAppCallSide
+  candidate Json
+  createdAt DateTime         @default(now())
+
+  @@index([sessionId, side])
+  @@map("in_app_call_candidates")
+}
+
 model Business {
   id        String   @id @default(cuid())
   name      String
@@ -206,10 +255,10 @@ model Business {
   customerIdentities CustomerIdentity[]
   conversations      Conversation[]
   integrations       Integration[]
-  shopifyStore        ShopifyStore?
-  subscription        Subscription?
-  webhookEvents       WebhookEvent[]
-  notifications       Notification[]
+  shopifyStore       ShopifyStore?
+  subscription       Subscription?
+  webhookEvents      WebhookEvent[]
+  notifications      Notification[]
 
   @@map("businesses")
 }
@@ -241,17 +290,17 @@ model Subscription {
 }
 
 model Customer {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   businessId      String
-  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business        Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
   name            String?
   email           String?
   phone           String?
-  tags            String[] @default([])
+  tags            String[]  @default([])
   notes           String?
   assignedUserId  String?
-  assignedUser    User?    @relation("CustomerAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
-  createdAt       DateTime @default(now())
+  assignedUser    User?     @relation("CustomerAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime  @default(now())
   lastContactedAt DateTime?
 
   identities    CustomerIdentity[]

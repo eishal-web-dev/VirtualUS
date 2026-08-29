@@ -1,19 +1,44 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/card";
 import { useTwilioDevice } from "@/lib/use-twilio-device";
+import { useInAppDevice } from "@/lib/use-in-app-device";
 
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"];
 
 export function Dialer() {
-  const [ownedNumber, setOwnedNumber] = useState<string | null | undefined>(undefined);
+  const [ownedNumber, setOwnedNumber] = useState<
+    { number: string; provider: string } | null | undefined
+  >(undefined);
   const [destination, setDestination] = useState("");
   const [seconds, setSeconds] = useState(0);
 
+  const twilioDevice = useTwilioDevice(ownedNumber?.provider === "twilio");
+  const inAppDevice = useInAppDevice(ownedNumber?.provider === "demo");
+  const unavailableDevice = {
+    ready: false,
+    callState: "idle" as const,
+    error: ownedNumber?.provider === "telnyx"
+      ? "Browser calling requires the customer's Telnyx WebRTC setup. Connect Twilio for live browser calls, or use a free Ashes demo number."
+      : null,
+    incomingCall: null,
+    muted: false,
+    startCall: (_to: string) => undefined,
+    endCall: () => undefined,
+    toggleMute: () => undefined,
+    sendDigit: (_digit: string) => undefined,
+  };
+  const voiceDevice =
+    ownedNumber?.provider === "demo"
+      ? inAppDevice
+      : ownedNumber?.provider === "twilio"
+        ? twilioDevice
+        : unavailableDevice;
   const {
     ready,
     callState,
@@ -24,12 +49,12 @@ export function Dialer() {
     endCall,
     toggleMute,
     sendDigit,
-  } = useTwilioDevice();
+  } = voiceDevice;
 
   useEffect(() => {
     fetch("/api/numbers/me")
       .then((r) => r.json())
-      .then((data) => setOwnedNumber(data.phoneNumber?.number ?? null))
+      .then((data) => setOwnedNumber(data.phoneNumber ?? null))
       .catch(() => setOwnedNumber(null));
   }, []);
 
@@ -65,9 +90,12 @@ export function Dialer() {
         <h1 className="text-2xl font-semibold tracking-tight">Dialer</h1>
         <Card className="p-8 text-center">
           <p className="text-black/60">You need a US number before you can make calls.</p>
-          <a href="/dashboard/numbers" className="mt-4 inline-block">
-            <Button>Get a number</Button>
-          </a>
+          <Link
+            href="/dashboard/numbers"
+            className="mt-4 inline-flex items-center justify-center rounded-lg bg-ink px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-black/80 hover:shadow-md"
+          >
+            Get a number
+          </Link>
         </Card>
       </div>
     );
@@ -78,7 +106,10 @@ export function Dialer() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Dialer</h1>
-          <p className="mt-1 text-sm text-black/60">Calling from {ownedNumber}</p>
+          <p className="mt-1 text-sm text-black/60">
+            Calling from {ownedNumber.number}
+            {ownedNumber.provider === "demo" ? " · free Ashes network" : " · public phone network"}
+          </p>
         </div>
         <Badge tone={ready ? "green" : "yellow"}>{ready ? "Ready" : "Connecting device…"}</Badge>
       </div>
@@ -102,7 +133,7 @@ export function Dialer() {
         <Input
           value={destination}
           onChange={(e) => setDestination(e.target.value)}
-          placeholder="+1 312 555 0100"
+          placeholder={ownedNumber.provider === "demo" ? "Another Ashes demo number" : "+1 312 555 0100"}
           disabled={isInCall}
           className="text-center text-lg tracking-wide"
         />
@@ -111,6 +142,7 @@ export function Dialer() {
           {KEYS.map((key) => (
             <button
               key={key}
+              type="button"
               onClick={() => handleKeyPress(key)}
               className="aspect-square rounded-xl border border-black/[.08] bg-white text-xl font-medium text-ink transition-all duration-150 hover:scale-[1.03] hover:border-brand-200 hover:bg-brand-50 active:scale-95"
             >
@@ -146,6 +178,11 @@ export function Dialer() {
           )}
         </div>
       </Card>
+      {ownedNumber.provider === "demo" && (
+        <p className="mx-auto max-w-sm text-center text-xs text-black/45">
+          Free browser calls connect only to another signed-in Ashes demo number. No carrier or public phone charge is created.
+        </p>
+      )}
     </div>
   );
 }

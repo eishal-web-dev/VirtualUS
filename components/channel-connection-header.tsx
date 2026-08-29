@@ -118,7 +118,13 @@ export function ChannelConnectionHeader({
         </div>
 
         <div className="flex items-center gap-3">
-          {integration && <Badge tone={STATUS_TONE[integration.status]}>{STATUS_LABEL[integration.status]}</Badge>}
+          {integration && (
+            <Badge tone={STATUS_TONE[integration.status]}>
+              {integration.status === "MOCK" && provider === "WHATSAPP"
+                ? "Free internal mode"
+                : STATUS_LABEL[integration.status]}
+            </Badge>
+          )}
 
           {!integration || integration.status === "NOT_CONNECTED" ? (
             <Button size="sm" onClick={connect} disabled={busy}>
@@ -150,8 +156,10 @@ export function ChannelConnectionHeader({
       {integration?.status === "MOCK" && !requiresApproval && (
         <p className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
           {integration.isConfigured && provider === "WHATSAPP"
-            ? "Telnyx is connected to Ashes Connect. Click Go live to reuse your Telnyx number for WhatsApp Business. If Meta onboarding is not complete yet, you will be sent to Telnyx to finish it."
-            : `Running in development mode with a simulated account — messages sent here are logged to the database but not delivered to a real ${meta.label} account.`}
+            ? "The customer's Telnyx account is connected. Click Go live to begin WhatsApp Business onboarding; carrier and Meta charges remain the customer's responsibility."
+            : provider === "WHATSAPP"
+              ? "Free internal mode delivers WhatsApp-style messages between Ashes demo numbers. It does not connect to or impersonate the public WhatsApp network."
+              : `Running in development mode with a simulated account — messages sent here are logged to the database but not delivered to a real ${meta.label} account.`}
         </p>
       )}
 

@@ -2,8 +2,7 @@ import crypto from "crypto";
 
 const TELNYX_API_BASE = "https://api.telnyx.com/v2";
 
-export function getTelnyxApiKey(): string {
-  const raw = process.env.TELNYX_API_KEY;
+export function normalizeTelnyxApiKey(raw: string | undefined): string {
   if (!raw) throw new Error("Missing required env var: TELNYX_API_KEY");
 
   let value = raw.trim();
@@ -18,6 +17,10 @@ export function getTelnyxApiKey(): string {
   value = value.replace(/^Bearer\s+/i, "").trim();
   if (!value) throw new Error("TELNYX_API_KEY is empty");
   return value;
+}
+
+export function getTelnyxApiKey(): string {
+  return normalizeTelnyxApiKey(process.env.TELNYX_API_KEY);
 }
 
 export function hasTelnyxApiKey(): boolean {
@@ -45,10 +48,12 @@ type ExistingMessagingProfile = {
  * a webhook PATCH can fail on a restricted account even though the profile is
  * perfectly usable and assignable to the number.
  */
-async function reuseExistingMessagingProfile<T>(): Promise<T | null> {
+async function reuseExistingMessagingProfile<T>(apiKey: string): Promise<T | null> {
   try {
     const list = await telnyxApi<{ data?: ExistingMessagingProfile[] }>(
-      "/messaging_profiles?page[size]=1"
+      "/messaging_profiles?page[size]=1",
+      {},
+      apiKey
     );
     const existing = list.data?.[0];
     if (!existing?.id) return null;
@@ -59,19 +64,24 @@ async function reuseExistingMessagingProfile<T>(): Promise<T | null> {
   }
 }
 
-export async function telnyxApi<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
+export async function telnyxApi<T = unknown>(
+  path: string,
+  init: RequestInit = {},
+  apiKeyOverride?: string
+): Promise<T> {
   const method = (init.method ?? "GET").toUpperCase();
+  const apiKey = apiKeyOverride ? normalizeTelnyxApiKey(apiKeyOverride) : getTelnyxApiKey();
 
   // Never try to create profile #2 on a restricted account when one already
   // exists. Webhook configuration is handled separately and must not block
   // profile reuse.
   if (path === "/messaging_profiles" && method === "POST") {
-    const reused = await reuseExistingMessagingProfile<T>();
+    const reused = await reuseExistingMessagingProfile<T>(apiKey);
     if (reused) return reused;
   }
 
   const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${getTelnyxApiKey()}`);
+  headers.set("Authorization", `Bearer ${apiKey}`);
   headers.set("Accept", "application/json");
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
 

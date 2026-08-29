@@ -4,6 +4,7 @@ import { getMessagingProvider } from "@/lib/messaging";
 import { resolveOrCreateCustomer, recordMessage } from "@/lib/inbox";
 import { e164Schema } from "@/lib/validation";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { deliverInAppMessage } from "@/lib/messaging/in-app-delivery";
 import { z } from "zod";
 
 const sendSchema = z.object({
@@ -55,7 +56,24 @@ export async function POST(req: Request) {
       senderUserId: tenant.userId,
     });
 
-    return NextResponse.json({ conversation, message }, { status: 201 });
+    if (result.providerMessageId.startsWith("demo_sms_")) {
+      await deliverInAppMessage({
+        senderBusinessId: tenant.businessId,
+        to,
+        text,
+        channel: "SMS",
+        providerMessageId: result.providerMessageId,
+      });
+    }
+
+    return NextResponse.json(
+      {
+        conversation,
+        message,
+        deliveryMode: result.providerMessageId.startsWith("demo_sms_") ? "ashes_network" : "carrier",
+      },
+      { status: 201 }
+    );
   } catch (err) {
     console.error("[sms/send] error", err);
     return NextResponse.json(
