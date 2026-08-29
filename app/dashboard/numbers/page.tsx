@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/card";
+import { Card, Badge } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
 type AvailableNumber = {
@@ -14,7 +13,7 @@ type AvailableNumber = {
   areaCode: string;
 };
 
-type ExistingTelnyxNumber = {
+type ExistingCarrierNumber = {
   id: string;
   phoneNumber: string;
   status: string | null;
@@ -28,10 +27,12 @@ type OwnedNumber = {
   provider: string;
 };
 
+type CarrierName = "demo" | "plivo" | "telnyx" | "twilio";
+
 type CarrierStatus = {
   connected: boolean;
-  provider: "demo" | "telnyx" | "twilio";
-  billingOwner: "free" | "customer" | "platform";
+  provider: CarrierName;
+  billingOwner: "free" | "trial" | "customer" | "platform";
 };
 
 const AREA_CODES = [
@@ -45,13 +46,13 @@ const AREA_CODES = [
 
 export default function NumbersPage() {
   const [owned, setOwned] = useState<OwnedNumber | null | undefined>(undefined);
-  const [existing, setExisting] = useState<ExistingTelnyxNumber[]>([]);
+  const [existing, setExisting] = useState<ExistingCarrierNumber[]>([]);
   const [carrier, setCarrier] = useState<CarrierStatus>({
     connected: false,
     provider: "demo",
     billingOwner: "free",
   });
-  const [resultProvider, setResultProvider] = useState<"demo" | "telnyx" | "twilio">("demo");
+  const [resultProvider, setResultProvider] = useState<CarrierName>("demo");
   const [areaCode, setAreaCode] = useState("312");
   const [results, setResults] = useState<AvailableNumber[]>([]);
   const [searching, setSearching] = useState(false);
@@ -64,10 +65,10 @@ export default function NumbersPage() {
       fetch("/api/numbers/me").then((r) => r.json()),
       fetch("/api/numbers/existing").then((r) => (r.ok ? r.json() : { numbers: [] })),
     ])
-      .then(([mine, carrier]) => {
+      .then(([mine, carrierData]) => {
         setOwned(mine.phoneNumber);
         setCarrier(mine.carrier);
-        setExisting(carrier.numbers ?? []);
+        setExisting(carrierData.numbers ?? []);
       })
       .catch(() => {
         setOwned(null);
@@ -92,7 +93,7 @@ export default function NumbersPage() {
     }
   }
 
-  async function importExisting(n: ExistingTelnyxNumber) {
+  async function importExisting(n: ExistingCarrierNumber) {
     setImporting(n.id);
     setError(null);
     try {
@@ -142,7 +143,7 @@ export default function NumbersPage() {
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Phone Number</h1>
-          <p className="mt-1 text-sm text-black/60">Your customer-funded public US number.</p>
+          <p className="mt-1 text-sm text-black/60">Your assigned public US number.</p>
         </div>
         <Card className="flex items-center justify-between p-6">
           <div>
@@ -151,11 +152,11 @@ export default function NumbersPage() {
           </div>
           <div className="flex items-center gap-2">
             <Badge tone="green">live</Badge>
-            <Badge tone="blue">customer billed</Badge>
+            <Badge tone="blue">{owned.provider}</Badge>
           </div>
         </Card>
         <p className="text-sm text-black/40">
-          Number, call, and message charges remain in the connected customer carrier account. Ashes does not pay them.
+          Ashes Connect keeps the carrier behind the scenes. Trial carrier credits are for development testing only.
         </p>
       </div>
     );
@@ -166,7 +167,7 @@ export default function NumbersPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Phone Number</h1>
         <p className="mt-1 text-sm text-black/60">
-          Start free inside Ashes, or use a customer-owned carrier for the public phone network.
+          Start free inside Ashes, or connect the Plivo free trial for a real US number during development.
         </p>
       </div>
 
@@ -177,7 +178,7 @@ export default function NumbersPage() {
               <p className="text-xs font-medium uppercase tracking-[0.14em] text-black/40">Free Ashes number</p>
               <p className="mt-2 text-2xl font-semibold tracking-tight">{owned.number}</p>
               <p className="mt-1 max-w-xl text-sm text-black/55">
-                Free calls and texts work between Ashes accounts. This reserved demo number is not reachable from ordinary phones or public WhatsApp.
+                Free calls and texts work between Ashes accounts. This demo number is not reachable from the public phone network.
               </p>
             </div>
             <Badge tone="blue">PKR 0</Badge>
@@ -188,7 +189,7 @@ export default function NumbersPage() {
                 href="/dashboard/settings/telecom"
                 className="inline-flex items-center justify-center rounded-lg border border-black/10 bg-white px-3 py-1.5 text-sm font-medium text-ink transition-all hover:border-black/20 hover:bg-black/[.03]"
               >
-                Customer needs public calling?
+                Activate real US testing for $0
               </Link>
             </div>
           )}
@@ -197,9 +198,9 @@ export default function NumbersPage() {
 
       {owned?.provider === "demo" && carrier.connected && (
         <Card className="border-green-100 bg-green-50/40 p-5">
-          <p className="font-medium text-green-900">Customer carrier connected</p>
+          <p className="font-medium text-green-900">{carrier.provider} connected</p>
           <p className="mt-1 text-sm text-green-800/70">
-            Choose or import a live number below. Any carrier charge goes directly to the customer&apos;s {carrier.provider} account.
+            Choose a live number below. With Plivo trial mode, usage comes from the included trial credits.
           </p>
         </Card>
       )}
@@ -208,19 +209,17 @@ export default function NumbersPage() {
         <Card className="p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="font-medium">Existing Telnyx number found</h2>
-              <p className="mt-1 text-sm text-black/50">
-                Ashes Connect fetched the number already owned by this Telnyx account. You can use it without placing another order.
-              </p>
+              <h2 className="font-medium">Existing carrier number found</h2>
+              <p className="mt-1 text-sm text-black/50">Use a number already owned by the connected carrier account.</p>
             </div>
-            <Badge tone="blue">Telnyx</Badge>
+            <Badge tone="blue">carrier</Badge>
           </div>
           <div className="mt-4 space-y-2">
             {existing.map((n) => (
               <div key={n.id} className="flex items-center justify-between rounded-lg border border-black/[.08] px-4 py-3">
                 <div>
                   <p className="font-medium">{n.phoneNumber}</p>
-                  <p className="text-xs text-black/40">{n.status ?? "Owned in Telnyx"}</p>
+                  <p className="text-xs text-black/40">{n.status ?? "Owned"}</p>
                 </div>
                 <Button size="sm" onClick={() => importExisting(n)} disabled={importing === n.id}>
                   {importing === n.id ? "Connecting…" : "Use this number"}
@@ -241,7 +240,7 @@ export default function NumbersPage() {
                 aria-pressed={areaCode === ac.code}
                 onClick={() => {
                   setAreaCode(ac.code);
-                  search(ac.code);
+                  void search(ac.code);
                 }}
                 className={`rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${
                   areaCode === ac.code
@@ -261,33 +260,25 @@ export default function NumbersPage() {
 
           <div className="mt-6">
             {searching && <p className="text-sm text-black/40">Searching for available numbers…</p>}
-
             {!searching && results.length === 0 && !error && existing.length === 0 && (
               <p className="text-sm text-black/40">Pick an area code above to search available numbers.</p>
             )}
 
             <div className="space-y-2">
               {results.map((n) => (
-                <div
-                  key={n.phoneNumber}
-                  className="flex items-center justify-between rounded-lg border border-black/[.08] px-4 py-3"
-                >
+                <div key={n.phoneNumber} className="flex items-center justify-between rounded-lg border border-black/[.08] px-4 py-3">
                   <div>
                     <p className="font-medium">{n.phoneNumber}</p>
-                    <p className="text-xs text-black/40">
-                      {n.locality ?? n.region ?? `Area code ${n.areaCode}`}
-                    </p>
+                    <p className="text-xs text-black/40">{n.locality ?? n.region ?? `Area code ${n.areaCode}`}</p>
                   </div>
-                  <Button
-                    size="sm"
-                    onClick={() => purchase(n)}
-                    disabled={purchasing === n.phoneNumber}
-                  >
+                  <Button size="sm" onClick={() => purchase(n)} disabled={purchasing === n.phoneNumber}>
                     {purchasing === n.phoneNumber
                       ? "Activating…"
                       : resultProvider === "demo"
                         ? "Use free demo number"
-                        : "Provision in customer account"}
+                        : resultProvider === "plivo"
+                          ? "Use trial credits"
+                          : "Provision number"}
                   </Button>
                 </div>
               ))}

@@ -2,11 +2,12 @@ import twilio from "twilio";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { getCarrierConnection, getTelnyxApiKeyForBusiness } from "@/lib/telecom/connection";
+import { plivoApi } from "@/lib/telecom/plivo";
 import { telnyxApi } from "@/lib/telnyx-api";
 import { BaseMessagingProvider } from "./base";
 import type { MessagingProvider, OutboundMessage, SendResult, InboundMessage } from "./provider";
 
-/** SMS through the number owner's carrier, with free Ashes-to-Ashes delivery. */
+/** SMS through the number's selected carrier, with free Ashes-to-Ashes delivery. */
 class SmsProvider extends BaseMessagingProvider implements MessagingProvider {
   readonly channel = "SMS" as const;
   protected dbProvider = "TWILIO" as const;
@@ -16,7 +17,7 @@ class SmsProvider extends BaseMessagingProvider implements MessagingProvider {
   }
 
   async getConnectUrl(): Promise<string | null> {
-    return null; // no OAuth step; tied to the business's provisioned number
+    return null;
   }
 
   async sendMessage(businessId: string, message: OutboundMessage): Promise<SendResult> {
@@ -33,18 +34,35 @@ class SmsProvider extends BaseMessagingProvider implements MessagingProvider {
       });
       if (!recipient) {
         throw new Error(
-          "Free SMS works only between Ashes demo numbers. Connect the customer's carrier to text public phone numbers."
+          "Free SMS works only between Ashes demo numbers. Connect the Plivo free trial to test public SMS."
         );
       }
       return { providerMessageId: `demo_sms_${crypto.randomUUID()}`, status: "SENT" };
     }
 
     const connection = await getCarrierConnection(businessId);
-    if (!connection) throw new Error("Connect the customer's carrier before sending public SMS");
+    if (!connection) throw new Error("Connect a carrier before sending public SMS");
+
+    if (connection.credentials.provider === "plivo") {
+      const sent = await plivoApi<{ message_uuid?: string[] }>(
+        connection.credentials.authId,
+        connection.credentials.authToken,
+        "/Message/",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            src: fromNumber.number,
+            dst: message.to,
+            text: message.text ?? "",
+          }),
+        }
+      );
+      return { providerMessageId: sent.message_uuid?.[0] ?? crypto.randomUUID(), status: "QUEUED" };
+    }
 
     if (connection.credentials.provider === "telnyx") {
       const apiKey = await getTelnyxApiKeyForBusiness(businessId);
-      if (!apiKey) throw new Error("The customer's Telnyx connection is unavailable");
+      if (!apiKey) throw new Error("The Telnyx connection is unavailable");
       const sent = await telnyxApi<{ data?: { id?: string } }>(
         "/messages",
         {
@@ -71,15 +89,23 @@ class SmsProvider extends BaseMessagingProvider implements MessagingProvider {
   }
 
   parseWebhookPayload(payload: unknown): InboundMessage[] {
-    const body = payload as { From?: string; Body?: string; MessageSid?: string; MediaUrl0?: string };
+    const body = payload as {
+      From?: string;
+      Body?: string;
+      Text?: string;
+      MessageSid?: string;
+      MessageUUID?: string;
+      MediaUrl0?: string;
+      Media0?: string;
+    };
     if (!body.From) return [];
     return [
       {
         externalConversationId: body.From,
         from: body.From,
-        text: body.Body,
-        attachmentUrl: body.MediaUrl0,
-        providerMessageId: body.MessageSid ?? crypto.randomUUID(),
+        text: body.Body ?? body.Text,
+        attachmentUrl: body.MediaUrl0 ?? body.Media0,
+        providerMessageId: body.MessageSid ?? body.MessageUUID ?? crypto.randomUUID(),
         timestamp: new Date(),
       },
     ];
@@ -87,11 +113,6 @@ class SmsProvider extends BaseMessagingProvider implements MessagingProvider {
 
   validateWebhookSignature(input: { payload: string; signatureHeader: string | null }): boolean {
     if (!input.signatureHeader) return false;
-    // Twilio's helper validates against (url, params) rather than a raw
-    // body string; the SMS webhook route performs that check directly via
-    // twilio.validateRequest instead of this method (form-encoded body
-    // makes signature validation shape-sensitive). Kept here to satisfy
-    // the shared interface.
     return true;
   }
 }

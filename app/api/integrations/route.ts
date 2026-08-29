@@ -3,9 +3,8 @@ import { requireTenant } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
 import { getMessagingProvider } from "@/lib/messaging";
 import { isConfigured as isShopifyConfigured } from "@/lib/shopify";
-import { getCarrierConnection } from "@/lib/telecom/connection";
+import { getCarrierConnection, getTelnyxApiKeyForBusiness } from "@/lib/telecom/connection";
 import type { IntegrationProvider } from "@prisma/client";
-import { getTelnyxApiKeyForBusiness } from "@/lib/telecom/connection";
 
 const CHANNEL_PROVIDERS: { provider: IntegrationProvider; label: string }[] = [
   { provider: "TWILIO", label: "Phone & SMS" },
@@ -17,6 +16,12 @@ const CHANNEL_PROVIDERS: { provider: IntegrationProvider; label: string }[] = [
   { provider: "SHOPIFY", label: "Shopify" },
 ];
 
+function carrierLabel(provider: "plivo" | "telnyx" | "twilio") {
+  if (provider === "plivo") return "Plivo · free-trial testing";
+  if (provider === "telnyx") return "Telnyx";
+  return "Twilio";
+}
+
 export async function GET() {
   const tenant = await requireTenant();
   if (tenant instanceof NextResponse) return tenant;
@@ -25,40 +30,43 @@ export async function GET() {
   const byProvider = new Map(rows.map((r) => [r.provider, r]));
 
   const carrier = await getCarrierConnection(tenant.businessId);
-  const integrations = await Promise.all(CHANNEL_PROVIDERS.map(async ({ provider, label }) => {
-    const row = byProvider.get(provider);
-    let isConfigured = false;
-    let accountName = row?.externalAccountName ?? null;
-    let status = row?.status ?? "NOT_CONNECTED";
-    try {
-      if (provider === "TWILIO") {
-        isConfigured = Boolean(carrier);
-        status = carrier ? "CONNECTED" : "MOCK";
-        accountName = carrier
-          ? `${carrier.credentials.provider === "telnyx" ? "Telnyx" : "Twilio"} · customer billed`
-          : "Free Ashes network";
-      } else if (provider === "SHOPIFY") {
-        isConfigured = isShopifyConfigured();
-      } else if (provider === "WHATSAPP") {
-        isConfigured = Boolean(await getTelnyxApiKeyForBusiness(tenant.businessId)) || getMessagingProvider(provider).isConfigured();
-      } else {
-        isConfigured = getMessagingProvider(provider).isConfigured();
+  const integrations = await Promise.all(
+    CHANNEL_PROVIDERS.map(async ({ provider, label }) => {
+      const row = byProvider.get(provider);
+      let isConfigured = false;
+      let accountName = row?.externalAccountName ?? null;
+      let status = row?.status ?? "NOT_CONNECTED";
+      try {
+        if (provider === "TWILIO") {
+          isConfigured = Boolean(carrier);
+          status = carrier ? "CONNECTED" : "MOCK";
+          accountName = carrier ? carrierLabel(carrier.credentials.provider) : "Free Ashes network";
+        } else if (provider === "SHOPIFY") {
+          isConfigured = isShopifyConfigured();
+        } else if (provider === "WHATSAPP") {
+          const telnyxWhatsApp =
+            process.env.WHATSAPP_TRANSPORT?.toLowerCase() === "telnyx" &&
+            Boolean(await getTelnyxApiKeyForBusiness(tenant.businessId));
+          isConfigured = telnyxWhatsApp || getMessagingProvider(provider).isConfigured();
+        } else {
+          isConfigured = getMessagingProvider(provider).isConfigured();
+        }
+      } catch {
+        isConfigured = false;
       }
-    } catch {
-      isConfigured = false;
-    }
 
-    return {
-      provider,
-      label,
-      status,
-      accountName,
-      connectedAt: row?.connectedAt ?? null,
-      lastSyncAt: row?.lastSyncAt ?? null,
-      lastError: row?.lastError ?? null,
-      isConfigured,
-    };
-  }));
+      return {
+        provider,
+        label,
+        status,
+        accountName,
+        connectedAt: row?.connectedAt ?? null,
+        lastSyncAt: row?.lastSyncAt ?? null,
+        lastError: row?.lastError ?? null,
+        isConfigured,
+      };
+    })
+  );
 
   return NextResponse.json({ integrations });
 }

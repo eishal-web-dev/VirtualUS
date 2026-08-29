@@ -5,14 +5,11 @@ import { getTelnyxApiKeyForBusiness } from "@/lib/telecom/connection";
 import { whatsAppProvider } from "@/lib/messaging/whatsapp";
 
 /**
- * Starts or synchronizes the WhatsApp Business connection.
+ * Starts or synchronizes WhatsApp Business.
  *
- * Preferred production path: Telnyx. Ashes Connect already owns the
- * business's Telnyx number, so we reuse that same number for SMS, Voice and
- * WhatsApp. Meta's Embedded Signup consent still happens in Telnyx because
- * that authorization cannot be completed server-side on the user's behalf.
- *
- * Direct Meta Cloud API remains as a fallback for deployments without Telnyx.
+ * Direct Meta is the default so Ashes' $0 development path is not coupled to
+ * a funded Telnyx account. Telnyx WhatsApp remains available only when a
+ * deployment explicitly opts in with WHATSAPP_TRANSPORT=telnyx.
  */
 export async function POST() {
   const tenant = await requireTenant();
@@ -20,7 +17,8 @@ export async function POST() {
   const roleCheck = requireRole(tenant, ["OWNER", "ADMIN"]);
   if (roleCheck) return roleCheck;
 
-  if (await getTelnyxApiKeyForBusiness(tenant.businessId)) {
+  const useTelnyx = process.env.WHATSAPP_TRANSPORT?.toLowerCase() === "telnyx";
+  if (useTelnyx && (await getTelnyxApiKeyForBusiness(tenant.businessId))) {
     try {
       const sync = await whatsAppProvider.syncTelnyxConnection(tenant.businessId);
       const integration = await prisma.integration.findUnique({
@@ -30,7 +28,6 @@ export async function POST() {
       if (sync.connected) {
         return NextResponse.json({ integration, mode: "telnyx", connected: true });
       }
-
       if (sync.onboardingRequired) {
         return NextResponse.json({
           integration,
@@ -40,7 +37,6 @@ export async function POST() {
           status: sync.status,
         });
       }
-
       return NextResponse.json({ integration, mode: "telnyx", connected: false });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not connect WhatsApp through Telnyx";
@@ -64,8 +60,13 @@ export async function POST() {
     const redirectUrl = await whatsAppProvider.getConnectUrl(tenant.businessId);
     await prisma.integration.upsert({
       where: { businessId_provider: { businessId: tenant.businessId, provider: "WHATSAPP" } },
-      create: { businessId: tenant.businessId, provider: "WHATSAPP", status: "PENDING_APPROVAL" },
-      update: { status: "PENDING_APPROVAL" },
+      create: {
+        businessId: tenant.businessId,
+        provider: "WHATSAPP",
+        status: "PENDING_APPROVAL",
+        lastError: null,
+      },
+      update: { status: "PENDING_APPROVAL", lastError: null },
     });
     return NextResponse.json({ redirectUrl, mode: "oauth" });
   }
@@ -78,8 +79,14 @@ export async function POST() {
       status: "MOCK",
       externalAccountName: "Demo WhatsApp Business account",
       connectedAt: new Date(),
+      lastError: null,
     },
-    update: { status: "MOCK", connectedAt: new Date() },
+    update: {
+      status: "MOCK",
+      externalAccountName: "Demo WhatsApp Business account",
+      connectedAt: new Date(),
+      lastError: null,
+    },
   });
 
   return NextResponse.json({ integration, mode: "mock" });

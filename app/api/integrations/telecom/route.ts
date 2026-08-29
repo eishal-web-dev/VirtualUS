@@ -6,7 +6,14 @@ import { requireRole, requireTenant } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
 import { encryptCredentials } from "@/lib/crypto";
 import { getCarrierConnection } from "@/lib/telecom/connection";
+import { plivoApi } from "@/lib/telecom/plivo";
 import { normalizeTelnyxApiKey, telnyxApi } from "@/lib/telnyx-api";
+
+const plivoSchema = z.object({
+  provider: z.literal("plivo"),
+  authId: z.string().min(8),
+  authToken: z.string().min(8),
+});
 
 const telnyxSchema = z.object({
   provider: z.literal("telnyx"),
@@ -22,7 +29,7 @@ const twilioSchema = z.object({
   twimlAppSid: z.string().regex(/^AP[a-zA-Z0-9]{30,}$/),
 });
 
-const connectSchema = z.discriminatedUnion("provider", [telnyxSchema, twilioSchema]);
+const connectSchema = z.discriminatedUnion("provider", [plivoSchema, telnyxSchema, twilioSchema]);
 
 export async function GET() {
   const tenant = await requireTenant();
@@ -38,13 +45,15 @@ export async function GET() {
     select: { number: true, provider: true },
   });
 
+  const provider = connection?.credentials.provider;
+  const providerLabel =
+    provider === "plivo" ? "Plivo account" : provider === "telnyx" ? "Telnyx account" : "Twilio account";
+
   return NextResponse.json({
-    mode: connection?.credentials.provider ?? "demo",
+    mode: provider ?? "demo",
     connected: Boolean(connection),
     source: connection?.source ?? "free",
-    accountName: connection
-      ? `${connection.credentials.provider === "telnyx" ? "Telnyx" : "Twilio"} account`
-      : "Free Ashes network",
+    accountName: connection ? providerLabel : "Free Ashes network",
     liveNumber,
   });
 }
@@ -71,7 +80,11 @@ export async function POST(req: Request) {
   }
 
   try {
-    if (parsed.data.provider === "telnyx") {
+    if (parsed.data.provider === "plivo") {
+      parsed.data.authId = parsed.data.authId.trim();
+      parsed.data.authToken = parsed.data.authToken.trim();
+      await plivoApi(parsed.data.authId, parsed.data.authToken, "/");
+    } else if (parsed.data.provider === "telnyx") {
       parsed.data.apiKey = normalizeTelnyxApiKey(parsed.data.apiKey);
       await telnyxApi("/balance", {}, parsed.data.apiKey);
     } else {
@@ -79,7 +92,13 @@ export async function POST(req: Request) {
       await client.api.v2010.accounts(parsed.data.accountSid).fetch();
     }
 
-    const label = parsed.data.provider === "telnyx" ? "Customer-owned Telnyx" : "Customer-owned Twilio";
+    const label =
+      parsed.data.provider === "plivo"
+        ? "Plivo free-trial carrier"
+        : parsed.data.provider === "telnyx"
+          ? "Customer-owned Telnyx"
+          : "Customer-owned Twilio";
+
     await prisma.integration.upsert({
       where: { businessId_provider: { businessId: tenant.businessId, provider: "TWILIO" } },
       create: {
@@ -88,7 +107,10 @@ export async function POST(req: Request) {
         status: "CONNECTED",
         externalAccountName: label,
         encryptedCredentials: encryptCredentials(parsed.data),
-        config: { carrier: parsed.data.provider, billingOwner: "customer" },
+        config: {
+          carrier: parsed.data.provider,
+          billingOwner: parsed.data.provider === "plivo" ? "trial" : "customer",
+        },
         connectedAt: new Date(),
         lastSyncAt: new Date(),
       },
@@ -96,7 +118,10 @@ export async function POST(req: Request) {
         status: "CONNECTED",
         externalAccountName: label,
         encryptedCredentials: encryptCredentials(parsed.data),
-        config: { carrier: parsed.data.provider, billingOwner: "customer" },
+        config: {
+          carrier: parsed.data.provider,
+          billingOwner: parsed.data.provider === "plivo" ? "trial" : "customer",
+        },
         connectedAt: new Date(),
         lastSyncAt: new Date(),
         lastError: null,

@@ -4,34 +4,41 @@ import { prisma } from "@/lib/prisma";
 import { purchaseNumberSchema } from "@/lib/validation";
 import { getTelecomProviderForBusiness } from "@/lib/telecom";
 
-function provisioningError(err: unknown): { message: string; status: number } {
+function provisioningError(err: unknown, provider: string): { message: string; status: number } {
   const raw = err instanceof Error ? err.message : "";
   const normalized = raw.toLowerCase();
 
   if (normalized.includes("only 1 order is allowed at your account level")) {
     return {
-      message:
-        "Telnyx has reached the phone-number order limit on this account. Open Telnyx and upgrade/verify the account (or use the number from the existing Telnyx order), then try again.",
+      message: "This Telnyx account cannot order another number. Switch to the Plivo free-trial option in Calling & SMS settings.",
       status: 409,
     };
   }
 
-  if (normalized.includes("insufficient") && normalized.includes("balance")) {
+  if (
+    normalized.includes("insufficient") ||
+    normalized.includes("not enough funds") ||
+    normalized.includes("balance") ||
+    normalized.includes("credits")
+  ) {
     return {
-      message: "Your Telnyx account does not have enough balance to buy this number. Add funds in Telnyx and try again.",
+      message:
+        provider === "plivo"
+          ? "Plivo says the free trial credits are unavailable or exhausted for this action."
+          : "The connected carrier does not have enough usable credit for this action.",
       status: 402,
     };
   }
 
   if (normalized.includes("verification") || normalized.includes("verify your account")) {
     return {
-      message: "Telnyx requires additional account verification before this number can be purchased.",
+      message: `${provider} requires its free account verification before this number can be activated.`,
       status: 403,
     };
   }
 
   return {
-    message: "Could not provision this number. It may have just been taken — try another.",
+    message: raw || "Could not provision this number. It may have just been taken — try another.",
     status: 502,
   };
 }
@@ -59,32 +66,51 @@ export async function POST(req: Request) {
   const existingNumbers = await prisma.phoneNumber.findMany({
     where: { businessId, status: "ACTIVE" },
   });
-  const hasLiveNumber = existingNumbers.some((number) => number.provider !== "demo");
+  const sameProviderLive = existingNumbers.some(
+    (number) => number.provider !== "demo" && number.provider === provider.name
+  );
   const hasDemoNumber = existingNumbers.some((number) => number.provider === "demo");
-  if (hasLiveNumber || (provider.name === "demo" && hasDemoNumber)) {
+  if (sameProviderLive || (provider.name === "demo" && hasDemoNumber)) {
     return NextResponse.json(
-      { error: "Your business already has an active number. MVP allows one number per account." },
+      { error: "Your business already has an active number for this carrier. MVP allows one number per account." },
       { status: 409 }
     );
   }
 
-  const baseUrl =
+  const baseUrl = (
     process.env.APP_BASE_URL ??
     process.env.NEXTAUTH_URL ??
-    "https://ashes-connect-app.vercel.app";
+    "https://ashes-connect-app.vercel.app"
+  ).replace(/\/$/, "");
+
+  const voiceWebhookUrl =
+    provider.name === "plivo"
+      ? `${baseUrl}/api/plivo/voice/incoming`
+      : `${baseUrl}/api/twilio/voice/incoming`;
+  const smsWebhookUrl =
+    provider.name === "plivo"
+      ? `${baseUrl}/api/plivo/sms/webhook`
+      : `${baseUrl}/api/twilio/sms/webhook`;
 
   let provisioned: { phoneNumber: string; providerSid: string } | null = null;
   try {
     provisioned = await provider.purchaseNumber(
       parsed.data.phoneNumber,
-      `${baseUrl}/api/twilio/voice/incoming`,
-      `${baseUrl}/api/twilio/sms/webhook`
+      voiceWebhookUrl,
+      smsWebhookUrl
     );
 
     const record = await prisma.$transaction(async (tx) => {
+      // Switching carriers should not strand the UI on the old live number.
+      // The previous carrier account remains untouched; only Ashes' assignment
+      // changes after the new provider successfully provisions a number.
       if (provider.name !== "demo") {
         await tx.phoneNumber.deleteMany({
-          where: { businessId, status: "ACTIVE", provider: "demo" },
+          where: {
+            businessId,
+            status: "ACTIVE",
+            OR: [{ provider: "demo" }, { provider: { not: provider.name } }],
+          },
         });
       }
       return tx.phoneNumber.create({
@@ -111,7 +137,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const mapped = provisioningError(err);
+    const mapped = provisioningError(err, provider.name);
     return NextResponse.json({ error: mapped.message }, { status: mapped.status });
   }
 }

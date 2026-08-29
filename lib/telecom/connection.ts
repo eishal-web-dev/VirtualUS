@@ -6,6 +6,12 @@ export type TelnyxCarrierCredentials = {
   apiKey: string;
 };
 
+export type PlivoCarrierCredentials = {
+  provider: "plivo";
+  authId: string;
+  authToken: string;
+};
+
 export type TwilioCarrierCredentials = {
   provider: "twilio";
   accountSid: string;
@@ -15,7 +21,10 @@ export type TwilioCarrierCredentials = {
   twimlAppSid: string;
 };
 
-export type CarrierCredentials = TelnyxCarrierCredentials | TwilioCarrierCredentials;
+export type CarrierCredentials =
+  | TelnyxCarrierCredentials
+  | PlivoCarrierCredentials
+  | TwilioCarrierCredentials;
 
 export type CarrierConnection = {
   source: "customer" | "platform";
@@ -27,9 +36,10 @@ function clean(value: string | undefined): string {
 }
 
 /**
- * Returns credentials paid for and owned by the current business. A shared
- * platform carrier is deliberately opt-in so Ashes never creates a telecom
- * charge merely because a deployment contains an old API key.
+ * Returns the carrier credentials selected for the business. Ashes can run
+ * entirely on its internal demo network when no carrier is connected. For
+ * development, Plivo trial credentials can be connected without a card and
+ * its free trial credits cover limited real PSTN testing.
  */
 export async function getCarrierConnection(
   businessId: string
@@ -47,6 +57,20 @@ export async function getCarrierConnection(
       };
     }
     if (
+      credentials.provider === "plivo" &&
+      clean(credentials.authId) &&
+      clean(credentials.authToken)
+    ) {
+      return {
+        source: "customer",
+        credentials: {
+          provider: "plivo",
+          authId: clean(credentials.authId),
+          authToken: clean(credentials.authToken),
+        },
+      };
+    }
+    if (
       credentials.provider === "twilio" &&
       credentials.accountSid &&
       credentials.authToken &&
@@ -61,6 +85,18 @@ export async function getCarrierConnection(
   if (process.env.ALLOW_PLATFORM_CARRIER !== "true") return null;
 
   const provider = process.env.TELECOM_PROVIDER?.toLowerCase();
+  if (provider === "plivo") {
+    const authId = clean(process.env.PLIVO_AUTH_ID);
+    const authToken = clean(process.env.PLIVO_AUTH_TOKEN);
+    if (authId && authToken) {
+      return {
+        source: "platform",
+        credentials: { provider: "plivo", authId, authToken },
+      };
+    }
+    return null;
+  }
+
   if (provider === "twilio") {
     const credentials: TwilioCarrierCredentials = {
       provider: "twilio",
@@ -71,17 +107,29 @@ export async function getCarrierConnection(
       twimlAppSid: clean(process.env.TWILIO_TWIML_APP_SID),
     };
     if (Object.values(credentials).every(Boolean)) return { source: "platform", credentials };
+    return null;
   }
 
-  const apiKey = clean(process.env.TELNYX_API_KEY);
-  if (apiKey) {
-    return { source: "platform", credentials: { provider: "telnyx", apiKey } };
+  if (provider === "telnyx") {
+    const apiKey = clean(process.env.TELNYX_API_KEY);
+    if (apiKey) {
+      return { source: "platform", credentials: { provider: "telnyx", apiKey } };
+    }
   }
 
+  // Never silently fall back to an old paid carrier key. If the requested
+  // provider is not fully configured, stay on the zero-cost demo network.
   return null;
 }
 
 export async function getTelnyxApiKeyForBusiness(businessId: string): Promise<string | null> {
   const connection = await getCarrierConnection(businessId);
   return connection?.credentials.provider === "telnyx" ? connection.credentials.apiKey : null;
+}
+
+export async function getPlivoCredentialsForBusiness(
+  businessId: string
+): Promise<PlivoCarrierCredentials | null> {
+  const connection = await getCarrierConnection(businessId);
+  return connection?.credentials.provider === "plivo" ? connection.credentials : null;
 }

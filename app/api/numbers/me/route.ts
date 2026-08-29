@@ -15,12 +15,31 @@ export async function GET() {
     getCarrierConnection(tenant.businessId),
   ]);
 
+  // When the owner switches carriers, hide the old carrier's number on the
+  // selection screen so a replacement can be chosen immediately. The old DB
+  // assignment is removed only after the new carrier provisions successfully.
+  const carrierName = carrier?.credentials.provider;
+  const visiblePhoneNumber =
+    phoneNumber &&
+    phoneNumber.provider !== "demo" &&
+    carrierName &&
+    phoneNumber.provider !== carrierName
+      ? null
+      : phoneNumber;
+
   return NextResponse.json({
-    phoneNumber,
+    phoneNumber: visiblePhoneNumber,
     carrier: {
       connected: Boolean(carrier),
-      provider: carrier?.credentials.provider ?? "demo",
-      billingOwner: carrier?.source === "customer" ? "customer" : carrier ? "platform" : "free",
+      provider: carrierName ?? "demo",
+      billingOwner:
+        carrierName === "plivo"
+          ? "trial"
+          : carrier?.source === "customer"
+            ? "customer"
+            : carrier
+              ? "platform"
+              : "free",
     },
   });
 }
