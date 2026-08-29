@@ -40,53 +40,21 @@ type ExistingMessagingProfile = {
 
 /**
  * Telnyx trial/limited accounts can have only one messaging profile. Ashes
- * Connect uses one shared Telnyx webhook and routes inbound events by phone
- * number, so reusing that existing profile is both safe and cheaper than
- * creating a profile per business.
+ * Connect uses one shared profile for the account and routes inbound events
+ * by phone number. Reuse must never depend on updating webhook settings first:
+ * a webhook PATCH can fail on a restricted account even though the profile is
+ * perfectly usable and assignable to the number.
  */
-async function reuseExistingMessagingProfile<T>(init: RequestInit): Promise<T | null> {
+async function reuseExistingMessagingProfile<T>(): Promise<T | null> {
   try {
     const list = await telnyxApi<{ data?: ExistingMessagingProfile[] }>(
       "/messaging_profiles?page[size]=1"
     );
     const existing = list.data?.[0];
     if (!existing?.id) return null;
-
-    let requestedWebhookUrl: string | undefined;
-    let requestedWebhookApiVersion: string | undefined;
-    if (typeof init.body === "string") {
-      try {
-        const requested = JSON.parse(init.body) as {
-          webhook_url?: string;
-          webhook_api_version?: string;
-        };
-        requestedWebhookUrl = requested.webhook_url;
-        requestedWebhookApiVersion = requested.webhook_api_version;
-      } catch {
-        // Ignore malformed optional profile settings here; the caller will
-        // still receive the existing profile and can continue assigning it.
-      }
-    }
-
-    const patchBody: Record<string, string> = {};
-    if (requestedWebhookUrl) patchBody.webhook_url = requestedWebhookUrl;
-    if (requestedWebhookApiVersion) {
-      patchBody.webhook_api_version = requestedWebhookApiVersion;
-    }
-
-    if (Object.keys(patchBody).length > 0) {
-      const patched = await telnyxApi<{ data?: ExistingMessagingProfile }>(
-        `/messaging_profiles/${encodeURIComponent(existing.id)}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify(patchBody),
-        }
-      );
-      return ({ data: patched.data ?? existing } as unknown) as T;
-    }
-
     return ({ data: existing } as unknown) as T;
-  } catch {
+  } catch (err) {
+    console.warn("[telnyx] could not list existing messaging profile", err);
     return null;
   }
 }
@@ -94,11 +62,11 @@ async function reuseExistingMessagingProfile<T>(init: RequestInit): Promise<T | 
 export async function telnyxApi<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
   const method = (init.method ?? "GET").toUpperCase();
 
-  // Before attempting to create a second messaging profile, reuse the one
-  // Telnyx already allows on restricted accounts. This also avoids the
-  // account-level "Only 1 messaging profile is allowed" and funding errors.
+  // Never try to create profile #2 on a restricted account when one already
+  // exists. Webhook configuration is handled separately and must not block
+  // profile reuse.
   if (path === "/messaging_profiles" && method === "POST") {
-    const reused = await reuseExistingMessagingProfile<T>(init);
+    const reused = await reuseExistingMessagingProfile<T>();
     if (reused) return reused;
   }
 
